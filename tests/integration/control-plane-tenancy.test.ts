@@ -151,5 +151,42 @@ suite('control-plane tenant boundaries', () => {
     expect(stored.rows[0]?.encrypted_secret).not.toContain(plaintext);
     expect(stored.rows[0]?.wrapped_dek).not.toContain(plaintext);
     expect(stored.rows[0]?.secret_fingerprint).toMatch(/^[a-f0-9]{16}$/);
+    const audit = await query<{ changes: Record<string, unknown> }>(
+      `SELECT changes FROM admin_audit_log WHERE org_id=$1 AND action='provider_credential.rotate' ORDER BY created_at DESC LIMIT 1`,
+      [orgId],
+    );
+    expect(JSON.stringify(audit.rows[0]?.changes)).not.toContain(plaintext);
+  });
+
+  it('appends an immutable actor audit record for a money-affecting mutation', async () => {
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/budgets',
+      headers: headers(),
+      payload: {
+        teamId: ownTeamId,
+        period: 'day',
+        limitMicros: '123456',
+        hardStop: true,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+
+    const audit = await query<{
+      id: string;
+      actor_user_id: string;
+      action: string;
+      changes: Record<string, unknown>;
+    }>(
+      `SELECT id,actor_user_id,action,changes FROM admin_audit_log WHERE org_id=$1 AND action='budget.upsert' ORDER BY created_at DESC LIMIT 1`,
+      [orgId],
+    );
+    expect(audit.rows[0]).toMatchObject({
+      action: 'budget.upsert',
+      changes: { teamId: ownTeamId, period: 'day', limitMicros: '123456', hardStop: true },
+    });
+    await expect(
+      query(`UPDATE admin_audit_log SET action='tampered' WHERE id=$1`, [audit.rows[0]!.id]),
+    ).rejects.toThrow(/append-only/);
   });
 });

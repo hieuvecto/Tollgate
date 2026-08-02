@@ -133,6 +133,8 @@ The service images use package-local compiled JavaScript, install production dep
 
 Provider credentials are organization-scoped and are accepted only through the authenticated control plane. Tollgate creates a random data-encryption key per credential, encrypts the credential with AES-256-GCM, and wraps that data key with `PROVIDER_CREDENTIAL_KEK`. Only ciphertext, authentication metadata, and a one-way fingerprint are stored; plaintext credentials and decrypted catalog entries are excluded from Redis.
 
+API-key lifecycle changes, provider-credential rotation and revocation, budget changes, and routing-limit changes append actor, target, request, and non-secret change metadata to `admin_audit_log` in the same transaction as the mutation. PostgreSQL rejects updates and deletes on that log. Owners, admins, and billing viewers can read their organization trail at `GET /admin/audit-log`; no tenant role can read another organization's entries.
+
 ## Benchmarks
 
 Run the gateway load profile with `make load`. For the deliberately limited language comparison, start `docker compose --profile benchmark up --build go-baseline` and apply the same direct pass-through workload to ports 3000 and 3010. The Go service is a streaming baseline—not a billing gateway—so its result isolates a lower bound rather than claiming feature parity.
