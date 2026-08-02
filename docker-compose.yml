@@ -1,0 +1,109 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tollgate
+      POSTGRES_PASSWORD: tollgate
+      POSTGRES_DB: tollgate
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tollgate']
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    ports: ['${POSTGRES_PORT:-5432}:5432']
+    volumes: ['postgres-data:/var/lib/postgresql/data']
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes', '--appendfsync', 'everysec']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    ports: ['${REDIS_PORT:-56379}:6379']
+    volumes: ['redis-data:/data']
+
+  migrate:
+    build: { context: ., target: base }
+    command: ['pnpm', 'db:migrate']
+    environment: &app-env
+      DATABASE_URL: postgres://tollgate:tollgate@postgres:5432/tollgate
+      REDIS_URL: redis://redis:6379
+      KEY_PEPPER: local-only-pepper-change-me
+      MOCK_PROVIDER_URL: http://mock-provider:4010
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  mock-provider:
+    build: { context: ., target: mock-provider }
+    environment: { PORT: 4010 }
+    ports: ['${MOCK_PROVIDER_PORT:-4010}:4010']
+
+  gateway:
+    build: { context: ., target: gateway }
+    environment:
+      <<: *app-env
+      PORT: 3000
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      mock-provider: { condition: service_started }
+    ports: ['${GATEWAY_PORT:-3000}:3000']
+
+  control-plane:
+    build: { context: ., target: control-plane }
+    environment:
+      <<: *app-env
+      PORT: 3001
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    ports: ['${CONTROL_PLANE_PORT:-3001}:3001']
+
+  worker:
+    build: { context: ., target: worker }
+    environment: *app-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    volumes: ['./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro']
+    ports: ['${PROMETHEUS_PORT:-9090}:9090']
+    depends_on: [gateway, worker]
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: tollgate
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ['${GRAFANA_PORT:-3002}:3000']
+    depends_on: [prometheus]
+
+  k6:
+    image: grafana/k6:1.2.3
+    profiles: ['load']
+    volumes: ['./tests/load:/scripts:ro']
+    command: ['run', '/scripts/gateway.js']
+    environment:
+      BASE_URL: ${LOAD_BASE_URL:-http://gateway:3000}
+      API_KEY: ${TOLLGATE_API_KEY:-seed-required}
+      TOKEN_DELAY_MS: ${TOKEN_DELAY_MS:-}
+    depends_on: [gateway]
+
+  go-baseline:
+    build: { context: ./bench/go-baseline }
+    profiles: ['benchmark']
+    environment: { UPSTREAM_URL: http://mock-provider:4010 }
+    ports: ['3010:3010']
+    depends_on: [mock-provider]
+
+volumes:
+  postgres-data:
+  redis-data:

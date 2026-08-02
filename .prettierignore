@@ -1,0 +1,7 @@
+Dockerfile
+Makefile
+bench/**/*.go
+node_modules/
+dist/
+coverage/
+.pnpm-store/

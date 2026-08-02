@@ -1,0 +1,9 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      { POSTGRES_USER: tollgate, POSTGRES_PASSWORD: tollgate, POSTGRES_DB: tollgate_test }
+    ports: ['55432:5432']
+  redis-test:
+    image: redis:7-alpine
+    ports: ['56379:6379']
