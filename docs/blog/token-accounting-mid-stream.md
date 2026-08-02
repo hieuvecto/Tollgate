@@ -6,4 +6,4 @@ Tollgate commits to three rules. It never retries after a client-visible byte, n
 
 Client disconnects abort upstream. Draining could obtain authoritative usage, but it might generate and charge tokens the client could not receive. The trade-off is explicit: cost containment now, reconciliation uncertainty later.
 
-Exactly-once charging does not require exactly-once delivery. The outbox can be delivered repeatedly because usage is unique per request and a charge is unique per request. Corrections are reversals, so an investigator can reconstruct every decision without trusting mutable history.
+Exactly-once charging does not require exactly-once delivery. The outbox can be delivered repeatedly because usage is unique per request and a charge is unique per request. The schema requires any future correction to be a reversal or adjustment so investigators can reconstruct every decision, but the current reconciliation workflow reports drift without creating those entries.

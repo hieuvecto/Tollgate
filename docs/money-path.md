@@ -28,4 +28,4 @@ Only successful non-streaming requests carrying `Idempotency-Key` store a replay
 
 Admission rejects traffic if it cannot create durable request and reservation state, regardless of finalization policy. After provider invocation, an explicitly configured `fail_open` organization may spool final usage into Redis AOF when PostgreSQL finalization fails. A client disconnect aborts the upstream request; observed tokens become an estimated usage fact if the provider never emitted final usage.
 
-The worker never edits an accounting fact. Corrections are new reversal or adjustment entries. Reconciliation proposes adjustments but never applies them automatically.
+The worker never edits an accounting fact. The schema requires future corrections to use new reversal or adjustment entries. No correction insertion or approval workflow is implemented yet: reconciliation records findings and leaves `proposed_adjustments` empty.

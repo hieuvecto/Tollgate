@@ -73,13 +73,13 @@ The central lifecycle is reserve → invoke → record → settle → reconcile.
 
 ## What is not negotiable
 
-Plaintext credentials are shown only at creation. Logs redact authorization and prompt paths. Money never uses floating point. Idempotency, outbox consumption, and charges are constrained in the database—not left to application timing. Accounting corrections are reversals rather than edits.
+Plaintext credentials are shown only at creation. Logs redact authorization and prompt paths. Money never uses floating point. Idempotency, outbox consumption, and charges are constrained in the database—not left to application timing. The schema reserves reversal and adjustment entries for future corrections; the current reconciliation command reports findings but does not propose or apply ledger changes.
 
 ## Where OpenAI compatibility leaks
 
 Chat and embedding bodies are validated before admission; malformed requests return an OpenAI-shaped `400 invalid_request_error`. Provider responses are normalized to the requested public model name in JSON and SSE so internal binding names do not leak to clients.
 
-The Anthropic adapter translates system messages, content blocks, tool use, stop reasons, cached-token fields, and SSE events. The mapping is necessarily lossy: reasoning blocks have no universal OpenAI representation; system-message placement differs; stop reasons are broader than OpenAI's; cached-token definitions are provider-specific; and provider tokenizer counts can disagree with estimates. Tollgate always prefers provider-reported usage when present.
+The non-streaming Anthropic adapter translates system messages, text and tool-use content blocks, stop reasons, and cached-token fields. Streaming currently translates text deltas and terminal usage only; streamed tool calls, the initial assistant-role delta, cached-input details, and terminal `finish_reason` remain unimplemented. The mapping is necessarily lossy: reasoning blocks have no universal OpenAI representation, system-message placement differs, and provider tokenizer counts can disagree with estimates. Tollgate always prefers provider-reported usage when present.
 
 The generic adapter can target a separately run Ollama, llama-server, or other OpenAI-compatible endpoint by changing the provider binding base URL and model name. No real-model runtime or model download is bundled.
 
@@ -91,6 +91,8 @@ The generic adapter can target a separately run Ollama, llama-server, or other O
 - Provider tokenizer drift can settle above the reserved estimate; no fixed percentage tolerance is claimed.
 - TPM is estimate-then-correct and may drift for the duration of a request plus settlement lag.
 - RPM and TPM use fixed one-minute buckets, so callers can burst across a bucket boundary.
+- Organization, team, and key rate counters currently share one policy limit; independently configured
+  hierarchical limits are not implemented.
 - If post-flight TPM correction cannot reach Redis, the conservative estimate remains until the
   bucket expires; the completed provider response is not converted into a gateway error.
 - Missing terminal usage is explicitly estimated and requires reconciliation.
@@ -98,6 +100,15 @@ The generic adapter can target a separately run Ollama, llama-server, or other O
   fail-open may spool final usage to Redis AOF during a brief finalization outage; it is not a substitute for
   a replicated accounting store.
 - Provider cost and public price are modeled separately only at the routing boundary; production pricing needs contractual provider tiers.
+- Provider credentials and authenticated upstream calls are not implemented; bundled providers are local
+  mocks or separately operated unauthenticated endpoints.
+- Providers, models, bindings, and pricing are a global operator catalog rather than tenant-owned resources.
+
+## How this was built
+
+The initial portfolio implementation was assembled agent-natively in one working session. Commits `m0` through `m10` were checkpointed in a short sequence after the working tree had been assembled; their timestamps are not presented as elapsed hand-development time. The history is preserved rather than rewritten.
+
+Subsequent remediation uses the repository's `AGENTS.md` guardrails: money-path work starts with an asserting test, each milestone must pass lint, strict typecheck, formatting, and the relevant local integration suite, and each passing milestone receives its own conventional commit. Tests use the scriptable local provider and require neither a provider credential nor external network access.
 
 ## Operations and tests
 
