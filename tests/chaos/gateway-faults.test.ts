@@ -447,6 +447,34 @@ suite('gateway fault and accounting contracts', () => {
     expect(responses.map((response) => response.status).sort()).toEqual([200, 402]);
   });
 
+  it('commits request creation and budget admission atomically', async () => {
+    await query(`
+      CREATE OR REPLACE FUNCTION delay_reservation_admission_for_test() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$;
+      CREATE TRIGGER delay_reservation_admission_for_test
+      BEFORE UPDATE ON reservations FOR EACH ROW
+      WHEN (OLD.status = 'pending' AND NEW.status = 'reserved')
+      EXECUTE FUNCTION delay_reservation_admission_for_test()
+    `);
+    const beganAt = new Date();
+    const responsePromise = chat(standard, { maxTokens: 1 });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      const visiblePending = await query<{ count: string }>(
+        `SELECT count(*)::text count FROM reservations r JOIN requests q ON q.id=r.request_id WHERE q.api_key_id=$1 AND q.created_at >= $2 AND r.status='pending'`,
+        [standard.keyId, beganAt],
+      );
+      expect(visiblePending.rows[0]?.count).toBe('0');
+      expect((await responsePromise).status).toBe(200);
+    } finally {
+      await responsePromise;
+      await query(`
+        DROP TRIGGER IF EXISTS delay_reservation_admission_for_test ON reservations;
+        DROP FUNCTION IF EXISTS delay_reservation_admission_for_test()
+      `);
+    }
+  });
+
   it('aborts the upstream request when a streaming client disconnects', async () => {
     const url = new URL('/v1/chat/completions', gatewayUrl);
     const requestId = await new Promise<string>((resolve, reject) => {

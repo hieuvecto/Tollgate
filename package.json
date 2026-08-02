@@ -19,7 +19,8 @@
     "test:chaos": "NODE_OPTIONS=--conditions=source vitest run tests/chaos --passWithNoTests",
     "db:migrate": "NODE_OPTIONS=--conditions=source tsx packages/db/src/migrate.ts",
     "db:seed": "NODE_OPTIONS=--conditions=source tsx packages/db/src/seed.ts",
-    "reconcile": "NODE_OPTIONS=--conditions=source tsx packages/worker/src/reconcile-once.ts"
+    "reconcile": "NODE_OPTIONS=--conditions=source tsx packages/worker/src/reconcile-once.ts",
+    "benchmark:local": "NODE_OPTIONS=--conditions=source tsx bench/benchmark.ts"
   },
   "dependencies": {
     "@tollgate/db": "workspace:*",

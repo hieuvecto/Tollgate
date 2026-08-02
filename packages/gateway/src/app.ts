@@ -14,12 +14,7 @@ import {
 import { authenticate, redis, type Principal } from './auth.js';
 import { estimateTokens, loadCatalog, type Catalog } from './catalog.js';
 import { correctTokens, rateLimit } from './limits.js';
-import {
-  admitReservationBudget,
-  finalizeRequest,
-  rejectPendingReservation,
-  spoolUsage,
-} from './metering.js';
+import { admitReservationBudget, finalizeRequest, spoolUsage } from './metering.js';
 import { inFlight, latency, registry, requests, tokens, ttft } from './metrics.js';
 import { normalizeProviderResponse, providerRequest } from './providers.js';
 import { recordProviderResult, routeBindings } from './routing.js';
@@ -48,6 +43,7 @@ async function beginRequest(
 ): Promise<StartedRequest | { replay: unknown }> {
   const requestId = randomUUID();
   const reservationId = randomUUID();
+  let admissionError: TollgateError | undefined;
   try {
     await transaction(async (client) => {
       await client.query(
@@ -74,6 +70,20 @@ async function beginRequest(
         requestId,
         reservationId,
       ]);
+      try {
+        await admitReservationBudget(client, reservationId);
+      } catch (error) {
+        if (!(error instanceof TollgateError) || error.code !== 'budget_exceeded') throw error;
+        await client.query(
+          `UPDATE reservations SET status='released',released_at=now() WHERE id=$1 AND status='pending'`,
+          [reservationId],
+        );
+        await client.query(
+          `UPDATE requests SET status='failed',finalized_at=now() WHERE id=$1 AND status='in_progress'`,
+          [requestId],
+        );
+        admissionError = error;
+      }
     });
   } catch (error: unknown) {
     if ((error as { code?: string }).code === '23505' && idempotencyKey)
@@ -84,6 +94,7 @@ async function beginRequest(
       );
     throw error;
   }
+  if (admissionError) throw admissionError;
   return { requestId, reservationId, storesIdempotencyResponse: idempotencyKey !== undefined };
 }
 
@@ -497,14 +508,6 @@ export function buildGateway() {
           reserved,
         );
         if ('replay' in begun) return begun.replay;
-        try {
-          await admitReservationBudget(begun.reservationId);
-        } catch (error) {
-          await rejectPendingReservation(begun.reservationId, begun.requestId).catch(
-            () => undefined,
-          );
-          throw error;
-        }
         const body = { ...chatBody, max_tokens: maxOutput };
         let result: unknown;
         try {
@@ -599,12 +602,6 @@ export function buildGateway() {
       });
       const begun = await beginRequest(principal, catalog, false, idempotencyKey, reserved);
       if ('replay' in begun) return begun.replay;
-      try {
-        await admitReservationBudget(begun.reservationId);
-      } catch (error) {
-        await rejectPendingReservation(begun.reservationId, begun.requestId).catch(() => undefined);
-        throw error;
-      }
       const controller = new AbortController();
       try {
         const selected = await providerFetch(

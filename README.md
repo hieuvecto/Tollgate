@@ -137,14 +137,15 @@ Provider credentials are organization-scoped and are accepted only through the a
 
 Run the gateway load profile with `make load`. For the deliberately limited language comparison, start `docker compose --profile benchmark up --build go-baseline` and apply the same direct pass-through workload to ports 3000 and 3010. The Go service is a streaming baseline—not a billing gateway—so its result isolates a lower bound rather than claiming feature parity.
 
-Measured on 2026-08-02 using Docker Desktop on an arm64 Mac, five concurrent local mock streams, 50 requests, and the checked-in k6 script:
+Measured on 2026-08-03 using Docker Desktop on an arm64 Mac, five concurrent local mock streams, and 50 measured requests after five warmups. The table reports the median complete sample across three identical runs of `pnpm benchmark:local`; the benchmark creates an isolated tenant while keeping its generated key only in process memory and never printing it. The [raw samples](bench/results/2026-08-03.json) are checked in.
 
-| Path                                        | Success |  Average |      p50 |       p95 |       p99 | Observed RSS |
-| ------------------------------------------- | ------: | -------: | -------: | --------: | --------: | -----------: |
-| Tollgate Node gateway, full accounting path |   50/50 | 53.32 ms | 46.21 ms | 106.19 ms | 113.19 ms |      167 MiB |
-| Minimal Go streaming proxy                  |   50/50 | 15.27 ms | 13.36 ms |  31.46 ms |  32.44 ms | 3.2 MiB idle |
+| Path                                          | Success | Average |     p50 |     p95 |      p99 |
+| --------------------------------------------- | ------: | ------: | ------: | ------: | -------: |
+| Pre-remediation gateway image                 |   50/50 | 38.58ms | 36.64ms | 60.79ms |  72.59ms |
+| Remediated gateway, full accounting path      |   50/50 | 33.55ms | 24.59ms | 63.37ms | 101.28ms |
+| Correctly flushing minimal Go streaming proxy |   50/50 |  8.42ms |  8.11ms | 12.28ms |  12.69ms |
 
-The gateway event-loop lag sample was 10.1 ms. A separate delayed-stream sample moved gateway RSS from 166.3 to 167.0 MiB with five active streams—about 0.14 MiB per stream, but too small a sample to treat as a capacity bound.
+Request creation and ledger-backed budget admission previously committed in two PostgreSQL transactions, temporarily exposing a pending reservation. They now commit in one transaction. The median sample improved average latency by 13.0% and p50 by 32.9%. p95 moved 4.2% in the other direction and p99 was noisy, so this small local run does not establish a tail-latency improvement. Raw sample results and host conditions should accompany any production capacity decision.
 
 The result does **not** say that equivalent Go billing code is four times faster: the Go baseline performs no authentication, Redis admission, PostgreSQL audit, routing health update, usage capture, or metrics accounting. It quantifies the optimization ceiling. Provider latency still dominates normal traffic, so Tollgate retains Node for shared types and implementation speed; revisit that choice when sustained concurrency makes measured gateway overhead material.
 

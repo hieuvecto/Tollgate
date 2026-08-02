@@ -1,0 +1,26 @@
+{
+  "environment": {
+    "host": "Docker Desktop on arm64 macOS",
+    "requestsPerSample": 50,
+    "warmupRequests": 5,
+    "concurrency": 5,
+    "upstream": "local mock provider"
+  },
+  "samples": {
+    "preRemediationGateway": [
+      { "averageMs": 42.5309, "p50Ms": 36.9374, "p95Ms": 88.3808, "p99Ms": 101.4612 },
+      { "averageMs": 38.5756, "p50Ms": 36.6402, "p95Ms": 60.791, "p99Ms": 72.5938 },
+      { "averageMs": 27.0627, "p50Ms": 20.6407, "p95Ms": 60.1609, "p99Ms": 71.8581 }
+    ],
+    "remediatedGateway": [
+      { "averageMs": 33.8994, "p50Ms": 29.4322, "p95Ms": 63.3659, "p99Ms": 101.2835 },
+      { "averageMs": 33.5519, "p50Ms": 24.5915, "p95Ms": 71.6613, "p99Ms": 113.9531 },
+      { "averageMs": 24.5573, "p50Ms": 23.0635, "p95Ms": 37.819, "p99Ms": 38.9659 }
+    ],
+    "flushingGoBaseline": [
+      { "averageMs": 15.2546, "p50Ms": 11.874, "p95Ms": 32.6862, "p99Ms": 52.5422 },
+      { "averageMs": 8.418, "p50Ms": 8.1111, "p95Ms": 12.2847, "p99Ms": 12.6859 },
+      { "averageMs": 8.1748, "p50Ms": 7.8785, "p95Ms": 11.681, "p99Ms": 12.3745 }
+    ]
+  }
+}

@@ -31,51 +31,35 @@ function periodBounds(period: BudgetRow['period'], createdAt: Date): [Date, Date
   return [start, end];
 }
 
-export async function admitReservationBudget(reservationId: string): Promise<void> {
-  await transaction(async (client) => {
-    const targetResult = await client.query<ReservationBudgetTarget>(
-      `SELECT r.org_id,r.team_id,q.created_at FROM reservations r JOIN requests q ON q.id=r.request_id WHERE r.id=$1 AND r.status='pending'`,
-      [reservationId],
-    );
-    const target = targetResult.rows[0];
-    if (!target) throw new Error(`Pending reservation ${reservationId} not found`);
-
-    const budgets = await client.query<BudgetRow>(
-      `SELECT id,team_id,period,limit_micros::text,hard_stop FROM budgets WHERE org_id=$1 AND (team_id IS NULL OR team_id=$2) ORDER BY team_id NULLS FIRST,period,id FOR UPDATE`,
-      [target.org_id, target.team_id],
-    );
-    for (const budget of budgets.rows) {
-      const [periodStart, periodEnd] = periodBounds(budget.period, target.created_at);
-      const state = await client.query<{ spent: string; reserved: string }>(
-        `SELECT COALESCE((SELECT SUM(l.amount_micros) FROM ledger_entries l JOIN requests q ON q.id=l.request_id WHERE l.org_id=$1 AND ($2::uuid IS NULL OR l.team_id=$2) AND q.created_at >= $3 AND q.created_at < $4),0)::text spent,COALESCE((SELECT SUM(r.amount_micros) FROM reservations r JOIN requests q ON q.id=r.request_id WHERE r.org_id=$1 AND ($2::uuid IS NULL OR r.team_id=$2) AND (r.status='reserved' OR r.id=$5) AND q.created_at >= $3 AND q.created_at < $4),0)::text reserved`,
-        [target.org_id, budget.team_id, periodStart, periodEnd, reservationId],
-      );
-      const spent = BigInt(state.rows[0]?.spent ?? '0');
-      const reserved = BigInt(state.rows[0]?.reserved ?? '0');
-      if (budget.hard_stop && spent + reserved > BigInt(budget.limit_micros))
-        throw new TollgateError(402, 'budget_exceeded', 'Budget exhausted');
-    }
-    await client.query(
-      `UPDATE reservations SET status='reserved' WHERE id=$1 AND status='pending'`,
-      [reservationId],
-    );
-  });
-}
-
-export async function rejectPendingReservation(
+export async function admitReservationBudget(
+  client: PoolClient,
   reservationId: string,
-  requestId: string,
 ): Promise<void> {
-  await transaction(async (client) => {
-    await client.query(
-      `UPDATE reservations SET status='released',released_at=now() WHERE id=$1 AND status='pending'`,
-      [reservationId],
+  const targetResult = await client.query<ReservationBudgetTarget>(
+    `SELECT r.org_id,r.team_id,q.created_at FROM reservations r JOIN requests q ON q.id=r.request_id WHERE r.id=$1 AND r.status='pending'`,
+    [reservationId],
+  );
+  const target = targetResult.rows[0];
+  if (!target) throw new Error(`Pending reservation ${reservationId} not found`);
+
+  const budgets = await client.query<BudgetRow>(
+    `SELECT id,team_id,period,limit_micros::text,hard_stop FROM budgets WHERE org_id=$1 AND (team_id IS NULL OR team_id=$2) ORDER BY team_id NULLS FIRST,period,id FOR UPDATE`,
+    [target.org_id, target.team_id],
+  );
+  for (const budget of budgets.rows) {
+    const [periodStart, periodEnd] = periodBounds(budget.period, target.created_at);
+    const state = await client.query<{ spent: string; reserved: string }>(
+      `SELECT COALESCE((SELECT SUM(l.amount_micros) FROM ledger_entries l JOIN requests q ON q.id=l.request_id WHERE l.org_id=$1 AND ($2::uuid IS NULL OR l.team_id=$2) AND q.created_at >= $3 AND q.created_at < $4),0)::text spent,COALESCE((SELECT SUM(r.amount_micros) FROM reservations r JOIN requests q ON q.id=r.request_id WHERE r.org_id=$1 AND ($2::uuid IS NULL OR r.team_id=$2) AND (r.status='reserved' OR r.id=$5) AND q.created_at >= $3 AND q.created_at < $4),0)::text reserved`,
+      [target.org_id, budget.team_id, periodStart, periodEnd, reservationId],
     );
-    await client.query(
-      `UPDATE requests SET status='failed',finalized_at=now() WHERE id=$1 AND status='in_progress'`,
-      [requestId],
-    );
-  });
+    const spent = BigInt(state.rows[0]?.spent ?? '0');
+    const reserved = BigInt(state.rows[0]?.reserved ?? '0');
+    if (budget.hard_stop && spent + reserved > BigInt(budget.limit_micros))
+      throw new TollgateError(402, 'budget_exceeded', 'Budget exhausted');
+  }
+  await client.query(`UPDATE reservations SET status='reserved' WHERE id=$1 AND status='pending'`, [
+    reservationId,
+  ]);
 }
 
 export async function finalizeRequest(
