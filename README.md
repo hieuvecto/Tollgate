@@ -77,6 +77,8 @@ Plaintext credentials are shown only at creation. Logs redact authorization and 
 
 ## Where OpenAI compatibility leaks
 
+Chat and embedding bodies are validated before admission; malformed requests return an OpenAI-shaped `400 invalid_request_error`. Provider responses are normalized to the requested public model name in JSON and SSE so internal binding names do not leak to clients.
+
 The Anthropic adapter translates system messages, content blocks, tool use, stop reasons, cached-token fields, and SSE events. The mapping is necessarily lossy: reasoning blocks have no universal OpenAI representation; system-message placement differs; stop reasons are broader than OpenAI's; cached-token definitions are provider-specific; and provider tokenizer counts can disagree with estimates. Tollgate always prefers provider-reported usage when present.
 
 The generic adapter can target a separately run Ollama, llama-server, or other OpenAI-compatible endpoint by changing the provider binding base URL and model name. No real-model runtime or model download is bundled.

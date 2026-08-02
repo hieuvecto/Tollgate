@@ -23,6 +23,7 @@ import {
 import { inFlight, latency, registry, requests, tokens, ttft } from './metrics.js';
 import { normalizeProviderResponse, providerRequest } from './providers.js';
 import { recordProviderResult, routeBindings } from './routing.js';
+import { parseChatCompletion, parseEmbedding } from './validation.js';
 
 const config = loadConfig();
 const forwardedFaultHeaders = [
@@ -412,22 +413,23 @@ export function buildGateway() {
       })),
     };
   });
-  app.post<{ Body: ChatCompletionRequest }>(
+  app.post<{ Body: unknown }>(
     '/v1/chat/completions',
     { preHandler: authenticate },
     async (request, reply) => {
+      const chatBody = parseChatCompletion(request.body);
       inFlight.inc();
-      const stop = latency.startTimer({ model: request.body.model });
+      const stop = latency.startTimer({ model: chatBody.model });
       try {
         const principal = await authenticate(request);
-        if (request.body.stream && request.headers['idempotency-key'])
+        if (chatBody.stream && request.headers['idempotency-key'])
           throw new TollgateError(
             400,
             'stream_idempotency_unsupported',
             'Idempotency-Key is not supported for streaming requests',
           );
         if (
-          !principal.scopes.models?.includes(request.body.model) ||
+          !principal.scopes.models?.includes(chatBody.model) ||
           !principal.scopes.endpoints?.includes('chat')
         )
           throw new TollgateError(403, 'scope_denied', 'API key scope does not allow this request');
@@ -436,9 +438,9 @@ export function buildGateway() {
           : undefined;
         const replay = await replayFor(principal.orgId, idempotencyKey);
         if (replay) return replay;
-        const catalog = await loadCatalog(principal.orgId, request.body.model);
-        const inputEstimate = estimateTokens(request.body.messages);
-        const maxOutput = request.body.max_tokens ?? catalog.defaultMaxOutput;
+        const catalog = await loadCatalog(principal.orgId, chatBody.model);
+        const inputEstimate = estimateTokens(chatBody.messages);
+        const maxOutput = chatBody.max_tokens ?? catalog.defaultMaxOutput;
         const reserved = priceTokens(
           inputEstimate,
           maxOutput,
@@ -464,7 +466,7 @@ export function buildGateway() {
         const begun = await beginRequest(
           principal,
           catalog,
-          Boolean(request.body.stream),
+          Boolean(chatBody.stream),
           idempotencyKey,
           reserved,
         );
@@ -477,7 +479,7 @@ export function buildGateway() {
           );
           throw error;
         }
-        const body = { ...request.body, max_tokens: maxOutput };
+        const body = { ...chatBody, max_tokens: maxOutput };
         let result: unknown;
         try {
           result = body.stream
@@ -530,12 +532,13 @@ export function buildGateway() {
       }
     },
   );
-  app.post<{ Body: Record<string, unknown> }>(
+  app.post<{ Body: unknown }>(
     '/v1/embeddings',
     { preHandler: authenticate },
     async (request, reply) => {
+      const embeddingBody = parseEmbedding(request.body);
       const principal = await authenticate(request);
-      const model = typeof request.body.model === 'string' ? request.body.model : '';
+      const model = embeddingBody.model;
       if (
         !principal.scopes.models?.includes(model) ||
         !principal.scopes.endpoints?.includes('embeddings')
@@ -547,7 +550,7 @@ export function buildGateway() {
       const replay = await replayFor(principal.orgId, idempotencyKey);
       if (replay) return replay;
       const catalog = await loadCatalog(principal.orgId, model);
-      const inputEstimate = estimateTokens(request.body.input);
+      const inputEstimate = estimateTokens(embeddingBody.input);
       const reserved = priceTokens(
         inputEstimate,
         0,
@@ -583,7 +586,7 @@ export function buildGateway() {
           catalog,
           '/v1/embeddings',
           request,
-          request.body,
+          embeddingBody,
           begun.requestId,
           controller.signal,
         );

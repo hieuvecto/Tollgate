@@ -14,6 +14,54 @@ export interface ProviderBinding {
   outputCostPerMtok?: bigint;
 }
 
+function responseHeaders(response: Response): Headers {
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  return headers;
+}
+
+function normalizeCompatibleStream(response: Response, publicModel: string): Response {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = '';
+  const transformEvent = (event: string) =>
+    event
+      .split('\n')
+      .map((line) => {
+        if (!line.startsWith('data: ') || line.slice(6) === '[DONE]') return line;
+        try {
+          const payload = JSON.parse(line.slice(6)) as Record<string, unknown>;
+          if ('model' in payload) payload.model = publicModel;
+          return `data: ${JSON.stringify(payload)}`;
+        } catch {
+          return line;
+        }
+      })
+      .join('\n');
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = response.body!.getReader();
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+        for (const event of events)
+          controller.enqueue(encoder.encode(`${transformEvent(event)}\n\n`));
+      }
+      buffer += decoder.decode();
+      if (buffer) controller.enqueue(encoder.encode(transformEvent(buffer)));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders(response),
+  });
+}
+
 export function providerRequest(
   binding: ProviderBinding,
   path: string,
@@ -50,8 +98,18 @@ export async function normalizeProviderResponse(
   response: Response,
   publicModel: string,
 ): Promise<Response> {
-  if (binding.kind !== 'anthropic' || !response.ok) return response;
+  if (!response.ok) return response;
   if (!response.body) return response;
+  if (binding.kind !== 'anthropic') {
+    if (response.headers.get('content-type')?.includes('text/event-stream'))
+      return normalizeCompatibleStream(response, publicModel);
+    const raw = (await response.json()) as Record<string, unknown>;
+    return new Response(JSON.stringify({ ...raw, model: publicModel }), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders(response),
+    });
+  }
   if (!response.headers.get('content-type')?.includes('text/event-stream')) {
     const raw = (await response.json()) as Record<string, unknown>;
     const content = raw.content as Array<Record<string, unknown>> | undefined;

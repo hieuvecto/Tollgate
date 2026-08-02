@@ -211,7 +211,8 @@ suite('gateway fault and accounting contracts', () => {
     const replayKey = `replay-${randomUUID()}`;
     const first = await chat(standard, { idempotencyKey: replayKey, maxTokens: 4 });
     expect(first.status).toBe(200);
-    const firstBody: unknown = await first.json();
+    const firstBody = (await first.json()) as { model: string };
+    expect(firstBody.model).toBe(publicModel);
     const replay = await chat(standard, { idempotencyKey: replayKey, maxTokens: 4 });
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
@@ -259,7 +260,10 @@ suite('gateway fault and accounting contracts', () => {
   it('records provider-authoritative usage from a successful stream', async () => {
     const response = await chat(standard, { stream: true, maxTokens: 8 });
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain('[DONE]');
+    const streamBody = await response.text();
+    expect(streamBody).toContain('[DONE]');
+    expect(streamBody).toContain(`"model":"${publicModel}"`);
+    expect(streamBody).not.toContain('mock-primary');
     const requestId = response.headers.get('x-tollgate-request-id');
     expect(requestId).toBeTruthy();
     await eventually(async () => {
@@ -337,6 +341,35 @@ suite('gateway fault and accounting contracts', () => {
         ).redis.get(`rl:tpm:${scope}:${bucket}`),
       ).toBe(String(body.usage.total_tokens));
     }
+  });
+
+  it('returns a 400 without creating a request for malformed bodies', async () => {
+    const before = await query<{ count: string }>(
+      `SELECT count(*)::text count FROM requests WHERE api_key_id=$1`,
+      [standard.keyId],
+    );
+    for (const [path, payload] of [
+      ['/v1/chat/completions', { model: publicModel }],
+      ['/v1/embeddings', { model: publicModel }],
+    ] as const) {
+      const response = await fetch(`${gatewayUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${standard.key}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: 'invalid_request_error' },
+      });
+    }
+    const after = await query<{ count: string }>(
+      `SELECT count(*)::text count FROM requests WHERE api_key_id=$1`,
+      [standard.keyId],
+    );
+    expect(after.rows[0]?.count).toBe(before.rows[0]?.count);
   });
 
   it('enforces a hard budget before invoking the provider', async () => {
