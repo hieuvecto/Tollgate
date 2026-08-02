@@ -298,7 +298,7 @@ async function handleStream(
       controller.abort();
     }
   };
-  request.raw.once('close', closed);
+  reply.raw.once('close', closed);
   try {
     const selected = await providerFetch(
       catalog,
@@ -326,7 +326,8 @@ async function handleStream(
       const chunk = await reader.read();
       if (chunk.done) break;
       firstTokenMs ??= Math.round(performance.now() - began);
-      if (!reply.raw.write(chunk.value)) await once(reply.raw, 'drain');
+      if (!reply.raw.write(chunk.value))
+        await once(reply.raw, 'drain', { signal: controller.signal });
       parseBuffer += decoder.decode(chunk.value, { stream: true });
       const events = parseBuffer.split('\n\n');
       parseBuffer = events.pop() ?? '';
@@ -357,7 +358,7 @@ async function handleStream(
   } finally {
     clearTimeout(ttftTimer);
     clearTimeout(totalTimer);
-    request.raw.off('close', closed);
+    reply.raw.off('close', closed);
     const usage = finalUsage ?? {
       inputTokens: inputEstimate,
       outputTokens: estimateTokens(outputText),
