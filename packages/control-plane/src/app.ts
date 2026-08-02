@@ -2,11 +2,14 @@ import Fastify, { type FastifyRequest } from 'fastify';
 import { query } from '@tollgate/db';
 import {
   createLogger,
+  decodeProviderCredentialKek,
   issueSecret,
   loadConfig,
   moneyJson,
   openAIError,
   secretPrefix,
+  sealSecret,
+  secretFingerprint,
   TollgateError,
   verifySecret,
   type Role,
@@ -55,6 +58,11 @@ async function actor(request: FastifyRequest): Promise<Actor> {
 async function requireTeamInOrg(teamId: string, orgId: string): Promise<void> {
   const team = await query('SELECT 1 FROM teams WHERE id=$1 AND org_id=$2', [teamId, orgId]);
   if (!team.rowCount) throw new TollgateError(404, 'team_not_found', 'Team not found');
+}
+
+async function requireProvider(providerId: string): Promise<void> {
+  const provider = await query('SELECT 1 FROM providers WHERE id=$1 AND enabled', [providerId]);
+  if (!provider.rowCount) throw new TollgateError(404, 'provider_not_found', 'Provider not found');
 }
 
 export function buildControlPlane() {
@@ -214,6 +222,81 @@ export function buildControlPlane() {
   app.get('/admin/providers', { preHandler: allow('owner', 'admin', 'member') }, async () => ({
     data: (await query('SELECT id,name,kind,base_url,enabled FROM providers ORDER BY name')).rows,
   }));
+  app.get(
+    '/admin/provider-credentials',
+    { preHandler: allow('owner', 'admin') },
+    async (request) => {
+      const a = actorFor(request);
+      return {
+        data: (
+          await query(
+            `SELECT provider_id,secret_fingerprint,status,key_version,created_at,updated_at,revoked_at FROM provider_credentials WHERE org_id=$1 ORDER BY created_at`,
+            [a.orgId],
+          )
+        ).rows,
+      };
+    },
+  );
+  app.put<{ Params: { providerId: string }; Body: { apiKey?: string } }>(
+    '/admin/provider-credentials/:providerId',
+    { preHandler: allow('owner', 'admin') },
+    async (request) => {
+      const a = actorFor(request);
+      if (!request.body.apiKey || request.body.apiKey.length < 8)
+        throw new TollgateError(
+          400,
+          'invalid_request_error',
+          'Provider apiKey must be at least 8 characters',
+        );
+      await requireProvider(request.params.providerId);
+      let kek: Buffer;
+      try {
+        kek = decodeProviderCredentialKek(config.PROVIDER_CREDENTIAL_KEK);
+      } catch {
+        throw new TollgateError(
+          503,
+          'credential_encryption_unavailable',
+          'Provider credential encryption is not configured',
+        );
+      }
+      const context = `${a.orgId}:${request.params.providerId}`;
+      const sealed = sealSecret(request.body.apiKey, kek, context);
+      const fingerprint = secretFingerprint(request.body.apiKey);
+      await query(
+        `INSERT INTO provider_credentials(org_id,provider_id,encrypted_secret,secret_iv,secret_tag,wrapped_dek,wrap_iv,wrap_tag,key_version,secret_fingerprint,status,created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11)
+         ON CONFLICT(org_id,provider_id) DO UPDATE SET encrypted_secret=EXCLUDED.encrypted_secret,secret_iv=EXCLUDED.secret_iv,secret_tag=EXCLUDED.secret_tag,wrapped_dek=EXCLUDED.wrapped_dek,wrap_iv=EXCLUDED.wrap_iv,wrap_tag=EXCLUDED.wrap_tag,key_version=EXCLUDED.key_version,secret_fingerprint=EXCLUDED.secret_fingerprint,status='active',updated_at=now(),revoked_at=NULL`,
+        [
+          a.orgId,
+          request.params.providerId,
+          Buffer.from(sealed.ciphertext, 'base64'),
+          Buffer.from(sealed.secretIv, 'base64'),
+          Buffer.from(sealed.secretTag, 'base64'),
+          Buffer.from(sealed.wrappedDek, 'base64'),
+          Buffer.from(sealed.wrapIv, 'base64'),
+          Buffer.from(sealed.wrapTag, 'base64'),
+          sealed.keyVersion,
+          fingerprint,
+          a.userId,
+        ],
+      );
+      return { providerId: request.params.providerId, fingerprint, status: 'active' };
+    },
+  );
+  app.delete<{ Params: { providerId: string } }>(
+    '/admin/provider-credentials/:providerId',
+    { preHandler: allow('owner', 'admin') },
+    async (request) => {
+      const a = actorFor(request);
+      const result = await query(
+        `UPDATE provider_credentials SET status='revoked',revoked_at=now(),updated_at=now() WHERE org_id=$1 AND provider_id=$2 AND status='active'`,
+        [a.orgId, request.params.providerId],
+      );
+      if (!result.rowCount)
+        throw new TollgateError(404, 'credential_not_found', 'Active credential not found');
+      return { revoked: true };
+    },
+  );
   app.get('/admin/models', { preHandler: allow('owner', 'admin', 'member') }, async () => ({
     data: (
       await query(

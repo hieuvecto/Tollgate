@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { issueSecret, loadConfig, secretPrefix, verifySecret } from '@tollgate/shared';
+import { randomBytes } from 'node:crypto';
+import {
+  issueSecret,
+  loadConfig,
+  openSecret,
+  sealSecret,
+  secretPrefix,
+  verifySecret,
+} from '@tollgate/shared';
 
 describe('secret hashing', () => {
   it('issues verifiable secrets while separating display prefix and hash', () => {
@@ -22,5 +30,17 @@ describe('production secret configuration', () => {
     });
 
     expect(config.NODE_ENV).toBe('production');
+  });
+});
+
+describe('provider credential envelope encryption', () => {
+  it('wraps a unique data key and binds ciphertext to its tenant context', () => {
+    const kek = Buffer.alloc(32, 7);
+    const plaintext = randomBytes(24).toString('base64url');
+    const sealed = sealSecret(plaintext, kek, 'org-1:provider-1');
+
+    expect(JSON.stringify(sealed)).not.toContain(plaintext);
+    expect(openSecret(sealed, kek, 'org-1:provider-1')).toBe(plaintext);
+    expect(() => openSecret(sealed, kek, 'org-2:provider-1')).toThrow();
   });
 });

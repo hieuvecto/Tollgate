@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import {
   normalizeProviderResponse,
   providerRequest,
@@ -14,7 +15,8 @@ const anthropic = {
 
 describe('Anthropic adapter', () => {
   it('moves system messages into the Anthropic system field', () => {
-    const translated = providerRequest(anthropic, '/v1/chat/completions', {
+    const credential = randomBytes(24).toString('base64url');
+    const translated = providerRequest({ ...anthropic, credential }, '/v1/chat/completions', {
       model: 'public',
       messages: [
         { role: 'system', content: 'safe' },
@@ -22,10 +24,21 @@ describe('Anthropic adapter', () => {
       ],
     });
     expect(translated.url).toBe('http://mock/v1/messages');
+    expect(translated.headers).toMatchObject({ 'x-api-key': credential });
     expect(translated.body).toMatchObject({
       system: 'safe',
       messages: [{ role: 'user', content: 'hello' }],
     });
+  });
+  it('uses bearer authentication for OpenAI-compatible providers', () => {
+    const credential = randomBytes(24).toString('base64url');
+    const translated = providerRequest(
+      { ...anthropic, kind: 'openai_compatible', credential },
+      '/v1/chat/completions',
+      { model: 'public', messages: [] },
+    );
+
+    expect(translated.headers).toEqual({ authorization: `Bearer ${credential}` });
   });
   it('normalizes usage and content into an OpenAI completion', async () => {
     const raw = Response.json({

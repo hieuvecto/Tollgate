@@ -12,6 +12,8 @@ export interface ProviderBinding {
   breakerState?: string;
   inputCostPerMtok?: bigint;
   outputCostPerMtok?: bigint;
+  credential?: string;
+  credentialRequired?: boolean;
 }
 
 function responseHeaders(response: Response): Headers {
@@ -67,11 +69,16 @@ export function providerRequest(
   path: string,
   body: Record<string, unknown>,
 ) {
+  const credentialHeaders = binding.credential
+    ? binding.kind === 'anthropic'
+      ? { 'x-api-key': binding.credential }
+      : { authorization: `Bearer ${binding.credential}` }
+    : {};
   if (binding.kind !== 'anthropic' || path !== '/v1/chat/completions') {
     return {
       url: `${binding.baseUrl}${path}`,
       body: { ...body, model: binding.providerModel },
-      headers: {} as Record<string, string>,
+      headers: credentialHeaders,
     };
   }
   const chat = body as unknown as ChatCompletionRequest;
@@ -81,7 +88,7 @@ export function providerRequest(
     .join('\n');
   return {
     url: `${binding.baseUrl}/v1/messages`,
-    headers: { 'anthropic-version': '2023-06-01' },
+    headers: { 'anthropic-version': '2023-06-01', ...credentialHeaders },
     body: {
       model: binding.providerModel,
       max_tokens: chat.max_tokens ?? 512,

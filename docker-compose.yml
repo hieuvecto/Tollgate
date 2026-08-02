@@ -31,6 +31,7 @@ services:
       DATABASE_URL: postgres://tollgate:tollgate@postgres:5432/tollgate
       REDIS_URL: redis://redis:6379
       KEY_PEPPER: local-only-pepper-change-me
+      PROVIDER_CREDENTIAL_KEK: ${PROVIDER_CREDENTIAL_KEK:-}
       MOCK_PROVIDER_URL: http://mock-provider:4010
     depends_on:
       postgres: { condition: service_healthy }

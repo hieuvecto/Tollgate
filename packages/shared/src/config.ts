@@ -10,6 +10,7 @@ const schema = z
     DATABASE_URL: z.string().default('postgres://tollgate:tollgate@localhost:5432/tollgate'),
     REDIS_URL: z.string().default('redis://localhost:6379'),
     KEY_PEPPER: z.string().min(16).default(developmentPepper),
+    PROVIDER_CREDENTIAL_KEK: z.string().optional(),
     MOCK_PROVIDER_URL: z.string().url().default('http://localhost:4010'),
     POLICY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(15),
     TTFT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),

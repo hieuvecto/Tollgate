@@ -10,7 +10,7 @@ Tollgate treats usage and money as accounting facts, not mutable request metadat
 4. Every reservation becomes settled or released; the reaper exposes overdue reservations.
 5. Outbox dedupe keys and unique charge constraints make replay safe.
 6. Within the configured retention window, one organization/idempotency key invokes and charges at most once.
-7. Plaintext API keys never enter storage, logs, metrics, errors, or fixtures.
+7. Plaintext API keys and provider credentials never enter storage, logs, metrics, errors, or fixtures.
 8. Prompt logging defaults to `none`.
 9. Every request becomes terminal or reconciliation reports it.
 

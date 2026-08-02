@@ -100,8 +100,10 @@ The generic adapter can target a separately run Ollama, llama-server, or other O
   fail-open may spool final usage to Redis AOF during a brief finalization outage; it is not a substitute for
   a replicated accounting store.
 - Provider cost and public price are modeled separately only at the routing boundary; production pricing needs contractual provider tiers.
-- Provider credentials and authenticated upstream calls are not implemented; bundled providers are local
-  mocks or separately operated unauthenticated endpoints.
+- Organization owners can store per-provider BYOK credentials using envelope encryption. Authenticated
+  OpenAI-compatible calls use bearer tokens and Anthropic calls use `x-api-key`; the bundled local providers
+  remain credential-free. Deployments enabling BYOK must supply a base64-encoded 32-byte
+  `PROVIDER_CREDENTIAL_KEK`. External KMS integration and automated key-version rotation are not implemented.
 - Providers, models, bindings, and pricing are a global operator catalog rather than tenant-owned resources.
   Tenant credentials can read that catalog but cannot mutate global pricing; local operator changes use seed
   data or forward migrations until a separate platform-admin trust boundary exists.
@@ -128,6 +130,8 @@ Fault injection uses `X-Tollgate-Fault`: `pre_500`, `midstream_500`, `rate_limit
 Prometheus loads checked-in alerts for API error rate, outbox lag and dead letters, overdue reservations, and open provider breakers. The bundled Alertmanager receiver is deliberately local and has no external paging destination; production deployment must route it to the owning team's incident system.
 
 The service images use package-local compiled JavaScript, install production dependencies only, run as the unprivileged `tollgate` user, and expose HTTP health checks. The Compose stack explicitly uses development configuration for its bundled local pepper. A production process refuses to start with that pepper, so deployments must supply a unique `KEY_PEPPER` through their secret manager.
+
+Provider credentials are organization-scoped and are accepted only through the authenticated control plane. Tollgate creates a random data-encryption key per credential, encrypts the credential with AES-256-GCM, and wraps that data key with `PROVIDER_CREDENTIAL_KEK`. Only ciphertext, authentication metadata, and a one-way fingerprint are stored; plaintext credentials and decrypted catalog entries are excluded from Redis.
 
 ## Benchmarks
 
