@@ -13,6 +13,7 @@ const schema = z.object({
   TOTAL_STREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   DEFAULT_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(512),
   IDEMPOTENCY_RETENTION_HOURS: z.coerce.number().int().positive().default(24),
+  OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().default(10),
 });
 
 export type Config = z.infer<typeof schema>;

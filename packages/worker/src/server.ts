@@ -8,6 +8,7 @@ import {
   expireIdempotencyKeys,
 } from './settlement.js';
 import { query } from '@tollgate/db';
+import { singleFlight } from './loop.js';
 
 const registry = new Registry();
 const outboxLag = new Gauge({
@@ -30,13 +31,16 @@ app.get('/metrics', async (_request, reply) => {
   reservationLeaks.set(Number(state.rows[0]?.leaks ?? 0));
   return reply.type(registry.contentType).send(await registry.metrics());
 });
-const loop = setInterval(() => {
-  void drainMeteringSpool()
-    .then(() => settleBatch())
-    .then(() => expireIdempotencyKeys())
-    .catch((error: unknown) => app.log.error(error));
-  void reapReservations().catch((error: unknown) => app.log.error(error));
-}, 500);
+const runCycle = singleFlight(
+  async () => {
+    await drainMeteringSpool();
+    await settleBatch();
+    await reapReservations();
+    await expireIdempotencyKeys();
+  },
+  (error) => app.log.error(error),
+);
+const loop = setInterval(() => void runCycle(), 500);
 const shutdown = async () => {
   clearInterval(loop);
   await app.close();

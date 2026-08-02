@@ -79,4 +79,19 @@ suite('database money invariants', () => {
     expect(names).toContain('ledger_entries_pricing_id_fkey');
     expect(names).toContain('one_charge_per_request');
   });
+
+  it('has supporting indexes for worker and reporting scans', async () => {
+    const indexes = await db.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes WHERE schemaname='public'`,
+    );
+    const names = indexes.rows.map((row) => row.indexname);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'outbox_ready_for_processing',
+        'ledger_entries_org_created_at',
+        'requests_created_at',
+        'reservations_active_created_at',
+      ]),
+    );
+  });
 });

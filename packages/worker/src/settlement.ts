@@ -41,8 +41,8 @@ export async function drainMeteringSpool(batchSize = 50): Promise<number> {
 
 export async function settleBatch(batchSize = 50): Promise<number> {
   const items = await query<{ id: string; payload: UsageFact }>(
-    `SELECT id,payload FROM outbox WHERE processed_at IS NULL ORDER BY created_at LIMIT $1`,
-    [batchSize],
+    `SELECT id,payload FROM outbox WHERE processed_at IS NULL AND attempts < $2 AND next_attempt_at <= now() ORDER BY created_at LIMIT $1`,
+    [batchSize, config.OUTBOX_MAX_ATTEMPTS],
   );
   for (const item of items.rows) {
     try {
@@ -100,10 +100,10 @@ export async function settleBatch(batchSize = 50): Promise<number> {
         );
       });
     } catch (error) {
-      await query('UPDATE outbox SET attempts=attempts+1,last_error=$2 WHERE id=$1', [
-        item.id,
-        error instanceof Error ? error.message : String(error),
-      ]);
+      await query(
+        `UPDATE outbox SET attempts=attempts+1,last_error=$2,next_attempt_at=now()+make_interval(secs => (1 << LEAST(attempts,6))) WHERE id=$1`,
+        [item.id, error instanceof Error ? error.message : String(error)],
+      );
     }
   }
   return items.rowCount ?? 0;

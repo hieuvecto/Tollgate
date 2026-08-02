@@ -105,6 +105,8 @@ The generic adapter can target a separately run Ollama, llama-server, or other O
 - Providers, models, bindings, and pricing are a global operator catalog rather than tenant-owned resources.
   Tenant credentials can read that catalog but cannot mutate global pricing; local operator changes use seed
   data or forward migrations until a separate platform-admin trust boundary exists.
+- Outbox failures retry with bounded exponential backoff. After ten attempts the append-only payload remains
+  unprocessed as an inspectable dead letter; automatic replay or discard requires an explicit operator action.
 
 ## How this was built
 
