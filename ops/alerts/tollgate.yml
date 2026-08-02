@@ -1,0 +1,28 @@
+groups:
+  - name: tollgate
+    rules:
+      - alert: TollgateHighErrorRate
+        expr: sum(rate(tollgate_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(tollgate_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: 'Tollgate API 5xx rate exceeds 5%' }
+      - alert: TollgateOutboxLag
+        expr: tollgate_outbox_lag_seconds > 30
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: 'Tollgate settlement outbox is delayed' }
+      - alert: TollgateReservationLeak
+        expr: tollgate_reservation_leaks > 0
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: 'Tollgate has overdue reservations' }
+      - alert: TollgateProviderBreakerOpen
+        expr: tollgate_provider_breaker_open > 0
+        for: 2m
+        labels: { severity: ticket }
+        annotations: { summary: 'A Tollgate provider circuit breaker is open' }
+      - alert: TollgateOutboxDeadLetter
+        expr: tollgate_outbox_dead_letters > 0
+        for: 1m
+        labels: { severity: page }
+        annotations: { summary: 'Tollgate outbox items exhausted automatic retries' }

@@ -403,6 +403,15 @@ export function buildGateway() {
     requestIdHeader: 'x-request-id',
     disableRequestLogging: true,
   });
+  app.addHook('onResponse', async (request, reply) => {
+    if (!request.routeOptions.url?.startsWith('/v1/')) return;
+    const body =
+      typeof request.body === 'object' && request.body !== null
+        ? (request.body as Record<string, unknown>)
+        : undefined;
+    const model = typeof body?.model === 'string' ? body.model : 'unknown';
+    requests.inc({ model, provider: 'gateway', status: String(reply.statusCode) });
+  });
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);
     const known =
@@ -541,7 +550,6 @@ export function buildGateway() {
           });
           throw error;
         }
-        requests.inc({ model: catalog.publicName, provider: 'selected', status: 'success' });
         return result;
       } finally {
         inFlight.dec();

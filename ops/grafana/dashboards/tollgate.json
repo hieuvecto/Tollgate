@@ -35,6 +35,34 @@
       "title": "Reservation leaks",
       "targets": [{ "expr": "tollgate_reservation_leaks" }],
       "gridPos": { "x": 6, "y": 8, "w": 6, "h": 5 }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Accounted token rate",
+      "targets": [{ "expr": "sum(rate(tollgate_tokens_total[5m])) by (model,direction,source)" }],
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "In-flight requests",
+      "targets": [{ "expr": "tollgate_in_flight_requests" }],
+      "gridPos": { "x": 0, "y": 16, "w": 6, "h": 5 }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Open provider breakers",
+      "targets": [{ "expr": "sum(tollgate_provider_breaker_open)" }],
+      "gridPos": { "x": 6, "y": 16, "w": 6, "h": 5 }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Outbox dead letters",
+      "targets": [{ "expr": "tollgate_outbox_dead_letters" }],
+      "gridPos": { "x": 12, "y": 16, "w": 6, "h": 5 }
     }
   ]
 }

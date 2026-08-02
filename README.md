@@ -34,7 +34,7 @@ curl -N http://localhost:3000/v1/chat/completions \
   -d '{"model":"tg-mock","stream":true,"messages":[{"role":"user","content":"stream"}]}'
 ```
 
-Gateway, control plane, Grafana, Prometheus, and mock provider listen on ports 3000, 3001, 3002, 9090, and 4010 respectively.
+Gateway, control plane, Grafana, Prometheus, Alertmanager, and mock provider listen on ports 3000, 3001, 3002, 9090, 19093, and 4010 respectively.
 
 ## Architecture
 
@@ -124,6 +124,8 @@ TOLLGATE_API_KEY="$TOLLGATE_API_KEY" make load
 ```
 
 Fault injection uses `X-Tollgate-Fault`: `pre_500`, `midstream_500`, `rate_limit`, `hang`, `missing_usage`, or `wrong_usage`. Delay headers control TTFT and inter-token timing.
+
+Prometheus loads checked-in alerts for API error rate, outbox lag and dead letters, overdue reservations, and open provider breakers. The bundled Alertmanager receiver is deliberately local and has no external paging destination; production deployment must route it to the owning team's incident system.
 
 ## Benchmarks
 

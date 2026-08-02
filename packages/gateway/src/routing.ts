@@ -1,6 +1,7 @@
 import { query } from '@tollgate/db';
 import type { Catalog } from './catalog.js';
 import type { ProviderBinding } from './providers.js';
+import { providerBreakerOpen } from './metrics.js';
 
 export function routeBindings(catalog: Catalog, random = Math.random): ProviderBinding[] {
   const candidates = [...catalog.bindings];
@@ -35,8 +36,12 @@ export async function recordProviderResult(
   ttftMs?: number,
 ) {
   if (!bindingId) return;
-  await query(
-    `INSERT INTO provider_health(binding_id,ewma_ttft_ms,ewma_error_rate,consecutive_failures,breaker_state,opened_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(binding_id) DO UPDATE SET ewma_ttft_ms=CASE WHEN $2::numeric IS NULL THEN provider_health.ewma_ttft_ms ELSE COALESCE(provider_health.ewma_ttft_ms,$2)*0.8+$2*0.2 END,ewma_error_rate=provider_health.ewma_error_rate*0.8+$3*0.2,consecutive_failures=CASE WHEN $3=0 THEN 0 ELSE provider_health.consecutive_failures+1 END,breaker_state=CASE WHEN provider_health.consecutive_failures+1>=3 AND $3=1 THEN 'open' ELSE 'closed' END,opened_at=CASE WHEN provider_health.consecutive_failures+1>=3 AND $3=1 THEN now() ELSE NULL END,updated_at=now()`,
+  const result = await query<{ breaker_state: string }>(
+    `INSERT INTO provider_health(binding_id,ewma_ttft_ms,ewma_error_rate,consecutive_failures,breaker_state,opened_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(binding_id) DO UPDATE SET ewma_ttft_ms=CASE WHEN $2::numeric IS NULL THEN provider_health.ewma_ttft_ms ELSE COALESCE(provider_health.ewma_ttft_ms,$2)*0.8+$2*0.2 END,ewma_error_rate=provider_health.ewma_error_rate*0.8+$3*0.2,consecutive_failures=CASE WHEN $3=0 THEN 0 ELSE provider_health.consecutive_failures+1 END,breaker_state=CASE WHEN provider_health.consecutive_failures+1>=3 AND $3=1 THEN 'open' ELSE 'closed' END,opened_at=CASE WHEN provider_health.consecutive_failures+1>=3 AND $3=1 THEN now() ELSE NULL END,updated_at=now() RETURNING breaker_state`,
     [bindingId, ttftMs ?? null, ok ? 0 : 1, ok ? 0 : 1, ok ? 'closed' : 'closed', null],
+  );
+  providerBreakerOpen.set(
+    { binding_id: bindingId },
+    result.rows[0]?.breaker_state === 'open' ? 1 : 0,
   );
 }

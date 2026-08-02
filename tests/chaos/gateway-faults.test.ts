@@ -338,6 +338,13 @@ suite('gateway fault and accounting contracts', () => {
     expect(Number(request.rows[0]?.attempt_count)).toBe(2);
   });
 
+  it('exposes request and breaker metrics without a floating-point money counter', async () => {
+    const metrics = await (await fetch(`${gatewayUrl}/metrics`)).text();
+    expect(metrics).toContain('tollgate_requests_total');
+    expect(metrics).toContain('tollgate_provider_breaker_open');
+    expect(metrics).not.toContain('tollgate_cost_micros_total');
+  });
+
   it('enforces rate-limit rejection through the HTTP surface', async () => {
     const accepted = await chat(rateLimited, { maxTokens: 1 });
     expect(accepted.status).toBe(200);

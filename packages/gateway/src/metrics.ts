@@ -26,10 +26,10 @@ export const tokens = new Counter({
   labelNames: ['model', 'direction', 'source'],
   registers: [registry],
 });
-export const cost = new Counter({
-  name: 'tollgate_cost_micros_total',
-  help: 'Settled cost in integer micros',
-  labelNames: ['model'],
+export const providerBreakerOpen = new Gauge({
+  name: 'tollgate_provider_breaker_open',
+  help: 'Whether a provider binding circuit breaker is open',
+  labelNames: ['binding_id'],
   registers: [registry],
 });
 export const inFlight = new Gauge({

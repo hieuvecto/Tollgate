@@ -1,0 +1,4 @@
+route:
+  receiver: local-default
+receivers:
+  - name: local-default

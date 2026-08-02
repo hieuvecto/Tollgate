@@ -70,9 +70,16 @@ services:
 
   prometheus:
     image: prom/prometheus:v3.5.0
-    volumes: ['./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro']
+    volumes:
+      - './ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro'
+      - './ops/alerts:/etc/prometheus/rules:ro'
     ports: ['${PROMETHEUS_PORT:-9090}:9090']
-    depends_on: [gateway, worker]
+    depends_on: [gateway, worker, alertmanager]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    volumes: ['./ops/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro']
+    ports: ['${ALERTMANAGER_PORT:-19093}:9093']
 
   grafana:
     image: grafana/grafana:12.1.1

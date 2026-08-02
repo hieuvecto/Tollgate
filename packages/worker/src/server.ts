@@ -1,5 +1,4 @@
 import Fastify from 'fastify';
-import { Registry, Gauge } from 'prom-client';
 import {
   settleBatch,
   reapReservations,
@@ -9,26 +8,20 @@ import {
 } from './settlement.js';
 import { query } from '@tollgate/db';
 import { singleFlight } from './loop.js';
+import { loadConfig } from '@tollgate/shared';
+import { outboxDeadLetters, outboxLag, registry, reservationLeaks } from './metrics.js';
 
-const registry = new Registry();
-const outboxLag = new Gauge({
-  name: 'tollgate_outbox_lag_seconds',
-  help: 'Age of oldest unprocessed outbox item',
-  registers: [registry],
-});
-const reservationLeaks = new Gauge({
-  name: 'tollgate_reservation_leaks',
-  help: 'Reservations beyond the settlement window',
-  registers: [registry],
-});
+const config = loadConfig();
 const app = Fastify({ logger: true });
 app.get('/health', async () => ({ status: 'ok' }));
 app.get('/metrics', async (_request, reply) => {
-  const state = await query<{ lag: string | null; leaks: string }>(
-    `SELECT EXTRACT(EPOCH FROM (now()-(MIN(created_at) FILTER(WHERE processed_at IS NULL)))) lag,(SELECT count(*) FROM reservations WHERE status='reserved' AND created_at<now()-interval '10 minutes') leaks FROM outbox`,
+  const state = await query<{ lag: string | null; leaks: string; dead_letters: string }>(
+    `SELECT EXTRACT(EPOCH FROM (now()-(MIN(created_at) FILTER(WHERE processed_at IS NULL AND attempts < $1 AND next_attempt_at <= now())))) lag,(SELECT count(*) FROM reservations WHERE status='reserved' AND created_at<now()-interval '10 minutes') leaks,count(*) FILTER(WHERE processed_at IS NULL AND attempts >= $1) dead_letters FROM outbox`,
+    [config.OUTBOX_MAX_ATTEMPTS],
   );
   outboxLag.set(Number(state.rows[0]?.lag ?? 0));
   reservationLeaks.set(Number(state.rows[0]?.leaks ?? 0));
+  outboxDeadLetters.set(Number(state.rows[0]?.dead_letters ?? 0));
   return reply.type(registry.contentType).send(await registry.metrics());
 });
 const runCycle = singleFlight(
