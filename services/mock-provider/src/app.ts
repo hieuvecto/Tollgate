@@ -134,21 +134,31 @@ export function buildMockProvider() {
         type: 'message',
         role: 'assistant',
         model: request.body.model,
-        content: [{ type: 'text', text: 'Tollgate mock response' }],
-        stop_reason: 'end_turn',
+        content: request.body.tools
+          ? [{ type: 'tool_use', id: 'tool_mock', name: 'mock_tool', input: {} }]
+          : [{ type: 'text', text: 'Tollgate mock response' }],
+        stop_reason: request.body.tools ? 'tool_use' : 'end_turn',
         usage,
       };
     reply.hijack();
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream' });
     reply.raw.write(
-      `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id, usage: { input_tokens: usage.input_tokens } } })}\n\n`,
+      `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id, usage: { input_tokens: usage.input_tokens, cache_read_input_tokens: usage.cache_read_input_tokens } } })}\n\n`,
     );
-    for (const text of ['Tollgate', ' mock', ' response'])
+    if (request.body.tools) {
       reply.raw.write(
-        `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text } })}\n\n`,
+        `event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tool_mock', name: 'mock_tool', input: {} } })}\n\n`,
       );
+      reply.raw.write(
+        `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } })}\n\n`,
+      );
+    } else
+      for (const text of ['Tollgate', ' mock', ' response'])
+        reply.raw.write(
+          `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })}\n\n`,
+        );
     reply.raw.write(
-      `event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', usage: { output_tokens: usage.output_tokens } })}\n\n`,
+      `event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: request.body.tools ? 'tool_use' : 'end_turn' }, usage: { output_tokens: usage.output_tokens } })}\n\n`,
     );
     reply.raw.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
     reply.raw.end();

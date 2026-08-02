@@ -40,6 +40,7 @@ suite('gateway fault and accounting contracts', () => {
   let gatewayUrl = '';
   let mockUrl = '';
   let publicModel = '';
+  let anthropicPublicModel = '';
   let modelId = '';
   let pricingId = '';
   let firstProviderId = '';
@@ -75,7 +76,10 @@ suite('gateway fault and accounting contracts', () => {
         `integration-${label}`,
         issued.prefix,
         issued.hash,
-        JSON.stringify({ models: [publicModel], endpoints: ['chat', 'embeddings'] }),
+        JSON.stringify({
+          models: [publicModel, anthropicPublicModel],
+          endpoints: ['chat', 'embeddings'],
+        }),
       ],
     );
     await query(
@@ -155,16 +159,22 @@ suite('gateway fault and accounting contracts', () => {
     pricingId = randomUUID();
     firstProviderId = randomUUID();
     const secondProviderId = randomUUID();
+    const anthropicProviderId = randomUUID();
+    const anthropicModelId = randomUUID();
+    const anthropicPricingId = randomUUID();
     publicModel = `integration-${randomUUID()}`;
+    anthropicPublicModel = `integration-anthropic-${randomUUID()}`;
     mockUrl = `http://127.0.0.1:${mockAddress.port}`;
     await query(
-      `INSERT INTO providers(id,name,kind,base_url) VALUES($1,$2,'mock',$3),($4,$5,'openai_compatible',$3)`,
+      `INSERT INTO providers(id,name,kind,base_url) VALUES($1,$2,'mock',$3),($4,$5,'openai_compatible',$3),($6,$7,'anthropic',$3)`,
       [
         firstProviderId,
         `integration-primary-${randomUUID()}`,
         mockUrl,
         secondProviderId,
         `integration-secondary-${randomUUID()}`,
+        anthropicProviderId,
+        `integration-anthropic-${randomUUID()}`,
       ],
     );
     await query(
@@ -176,8 +186,20 @@ suite('gateway fault and accounting contracts', () => {
       [pricingId, modelId],
     );
     await query(
+      `INSERT INTO models(id,public_name,context_window,default_max_output_tokens) VALUES($1,$2,8192,16)`,
+      [anthropicModelId, anthropicPublicModel],
+    );
+    await query(
+      `INSERT INTO model_pricing(id,model_id,input_per_mtok,output_per_mtok,cached_input_per_mtok,effective_from) VALUES($1,$2,1000000,2000000,250000,'2020-01-01')`,
+      [anthropicPricingId, anthropicModelId],
+    );
+    await query(
       `INSERT INTO provider_bindings(model_id,provider_id,provider_model_name,priority) VALUES($1,$2,'mock-primary',1),($1,$3,'mock-secondary',2)`,
       [modelId, firstProviderId, secondProviderId],
+    );
+    await query(
+      `INSERT INTO provider_bindings(model_id,provider_id,provider_model_name,priority) VALUES($1,$2,'claude-mock',1)`,
+      [anthropicModelId, anthropicProviderId],
     );
     standard = await makeTenant('standard', 1000, 1_000_000_000n);
     rateLimited = await makeTenant('rate', 1, 1_000_000_000n);
@@ -293,6 +315,47 @@ suite('gateway fault and accounting contracts', () => {
         [`usage:${requestId}`],
       );
       expect(outbox.rows[0]?.payload).toMatchObject({ source: 'provider', outputTokens: 3 });
+    });
+  });
+
+  it('normalizes Anthropic tool streaming and cached usage end to end', async () => {
+    const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${standard.key}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: anthropicPublicModel,
+        stream: true,
+        messages: [{ role: 'user', content: 'use a tool' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'mock_tool',
+              parameters: { type: 'object', properties: {} },
+            },
+          },
+        ],
+      }),
+    });
+    expect(response.status).toBe(200);
+    const stream = await response.text();
+    expect(stream).toContain('"role":"assistant"');
+    expect(stream).toContain('"tool_calls"');
+    expect(stream).toContain('"finish_reason":"tool_calls"');
+    expect(stream).toContain('"cached_tokens":1');
+    expect(stream).toContain('data: [DONE]');
+    const requestId = response.headers.get('x-tollgate-request-id');
+    await eventually(async () => {
+      const outbox = await query<{
+        payload: { source: string; cachedInputTokens: number };
+      }>(`SELECT payload FROM outbox WHERE dedupe_key=$1`, [`usage:${requestId}`]);
+      expect(outbox.rows[0]?.payload).toMatchObject({
+        source: 'provider',
+        cachedInputTokens: 1,
+      });
     });
   });
 
