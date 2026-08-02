@@ -52,21 +52,26 @@ async function actor(request: FastifyRequest): Promise<Actor> {
   };
 }
 
-const allow =
-  (...roles: Role[]) =>
-  async (request: FastifyRequest) => {
-    const authenticated = await actor(request);
-    if (!authenticated.roles.some((role) => roles.includes(role)))
-      throw new TollgateError(403, 'forbidden', 'Role does not permit this operation');
-    return authenticated;
-  };
-
 async function requireTeamInOrg(teamId: string, orgId: string): Promise<void> {
   const team = await query('SELECT 1 FROM teams WHERE id=$1 AND org_id=$2', [teamId, orgId]);
   if (!team.rowCount) throw new TollgateError(404, 'team_not_found', 'Team not found');
 }
 
 export function buildControlPlane() {
+  const actors = new WeakMap<FastifyRequest, Actor>();
+  const allow =
+    (...roles: Role[]) =>
+    async (request: FastifyRequest) => {
+      const authenticated = await actor(request);
+      if (!authenticated.roles.some((role) => roles.includes(role)))
+        throw new TollgateError(403, 'forbidden', 'Role does not permit this operation');
+      actors.set(request, authenticated);
+    };
+  const actorFor = (request: FastifyRequest): Actor => {
+    const authenticated = actors.get(request);
+    if (!authenticated) throw new Error('Authenticated actor missing from request context');
+    return authenticated;
+  };
   const app = Fastify({ loggerInstance: createLogger(), disableRequestLogging: true });
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);
@@ -81,7 +86,7 @@ export function buildControlPlane() {
     '/admin/org',
     { preHandler: allow('owner', 'admin', 'member', 'billing_viewer') },
     async (request) => {
-      const a = await actor(request);
+      const a = actorFor(request);
       return (
         await query(
           'SELECT id,name,on_metering_failure,prompt_logging,prompt_retention_days,created_at FROM orgs WHERE id=$1',
@@ -94,7 +99,7 @@ export function buildControlPlane() {
     '/admin/teams',
     { preHandler: allow('owner', 'admin', 'member', 'billing_viewer') },
     async (request) => {
-      const a = await actor(request);
+      const a = actorFor(request);
       return {
         data: (
           await query('SELECT id,name,created_at FROM teams WHERE org_id=$1 ORDER BY name', [
@@ -105,7 +110,7 @@ export function buildControlPlane() {
     },
   );
   app.get('/admin/memberships', { preHandler: allow('owner', 'admin') }, async (request) => {
-    const a = await actor(request);
+    const a = actorFor(request);
     return {
       data: (
         await query(
@@ -116,7 +121,7 @@ export function buildControlPlane() {
     };
   });
   app.get('/admin/api-keys', { preHandler: allow('owner', 'admin') }, async (request) => {
-    const a = await actor(request);
+    const a = actorFor(request);
     return {
       data: (
         await query(
@@ -130,7 +135,7 @@ export function buildControlPlane() {
     '/admin/api-keys',
     { preHandler: allow('owner', 'admin') },
     async (request, reply) => {
-      const a = await actor(request);
+      const a = actorFor(request);
       if (request.body.teamId) await requireTeamInOrg(request.body.teamId, a.orgId);
       const issued = issueSecret('tg_live', config.KEY_PEPPER);
       const created = await query<{ id: string }>(
@@ -156,7 +161,7 @@ export function buildControlPlane() {
     '/admin/api-keys/:id/revoke',
     { preHandler: allow('owner', 'admin') },
     async (request) => {
-      const a = await actor(request);
+      const a = actorFor(request);
       const result = await query<{ key_prefix: string }>(
         `UPDATE api_keys SET status='revoked',revoked_at=now() WHERE id=$1 AND org_id=$2 AND status='active' RETURNING key_prefix`,
         [request.params.id, a.orgId],
@@ -170,7 +175,7 @@ export function buildControlPlane() {
     '/admin/budgets',
     { preHandler: allow('owner', 'admin', 'billing_viewer') },
     async (request) => {
-      const a = await actor(request);
+      const a = actorFor(request);
       const rows = await query<Record<string, unknown>>('SELECT * FROM budgets WHERE org_id=$1', [
         a.orgId,
       ]);
@@ -180,7 +185,7 @@ export function buildControlPlane() {
   app.put<{
     Body: { teamId?: string; period: 'day' | 'month'; limitMicros: string; hardStop: boolean };
   }>('/admin/budgets', { preHandler: allow('owner', 'admin') }, async (request) => {
-    const a = await actor(request);
+    const a = actorFor(request);
     if (request.body.teamId) await requireTeamInOrg(request.body.teamId, a.orgId);
     await query(
       `INSERT INTO budgets(org_id,team_id,period,limit_micros,hard_stop) VALUES($1,$2,$3,$4,$5) ON CONFLICT(org_id,team_id,period) DO UPDATE SET limit_micros=EXCLUDED.limit_micros,hard_stop=EXCLUDED.hard_stop`,
@@ -198,7 +203,7 @@ export function buildControlPlane() {
     '/admin/routing-policy',
     { preHandler: allow('owner', 'admin') },
     async (request) => {
-      const a = await actor(request);
+      const a = actorFor(request);
       await query(
         `INSERT INTO routing_policies(org_id,strategy,rpm_limit,tpm_limit) VALUES($1,$2,$3,$4) ON CONFLICT(org_id) DO UPDATE SET strategy=EXCLUDED.strategy,rpm_limit=EXCLUDED.rpm_limit,tpm_limit=EXCLUDED.tpm_limit`,
         [a.orgId, request.body.strategy, request.body.rpmLimit, request.body.tpmLimit],
@@ -220,7 +225,7 @@ export function buildControlPlane() {
     '/reports/spend',
     { preHandler: allow('owner', 'admin', 'billing_viewer') },
     async (request, reply) => {
-      const a = await actor(request);
+      const a = actorFor(request);
       const allowed: Record<string, string> = {
         org: 'l.org_id',
         team: 'l.team_id',

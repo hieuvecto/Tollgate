@@ -389,6 +389,15 @@ async function handleStream(
 }
 
 export function buildGateway() {
+  const principals = new WeakMap<FastifyRequest, Principal>();
+  const authenticateRequest = async (request: FastifyRequest) => {
+    principals.set(request, await authenticate(request));
+  };
+  const principalFor = (request: FastifyRequest): Principal => {
+    const principal = principals.get(request);
+    if (!principal) throw new Error('Authenticated principal missing from request context');
+    return principal;
+  };
   const app = Fastify({
     loggerInstance: createLogger(),
     requestIdHeader: 'x-request-id',
@@ -407,7 +416,7 @@ export function buildGateway() {
   app.get('/metrics', async (_request, reply) =>
     reply.type(registry.contentType).send(await registry.metrics()),
   );
-  app.get('/v1/models', { preHandler: authenticate }, async () => {
+  app.get('/v1/models', { preHandler: authenticateRequest }, async () => {
     const result = await query<{ id: string; public_name: string; created_at: Date }>(
       'SELECT id,public_name,now() created_at FROM models ORDER BY public_name',
     );
@@ -423,13 +432,13 @@ export function buildGateway() {
   });
   app.post<{ Body: unknown }>(
     '/v1/chat/completions',
-    { preHandler: authenticate },
+    { preHandler: authenticateRequest },
     async (request, reply) => {
       const chatBody = parseChatCompletion(request.body);
       inFlight.inc();
       const stop = latency.startTimer({ model: chatBody.model });
       try {
-        const principal = await authenticate(request);
+        const principal = principalFor(request);
         if (chatBody.stream && request.headers['idempotency-key'])
           throw new TollgateError(
             400,
@@ -542,10 +551,10 @@ export function buildGateway() {
   );
   app.post<{ Body: unknown }>(
     '/v1/embeddings',
-    { preHandler: authenticate },
+    { preHandler: authenticateRequest },
     async (request, reply) => {
       const embeddingBody = parseEmbedding(request.body);
-      const principal = await authenticate(request);
+      const principal = principalFor(request);
       const model = embeddingBody.model;
       if (
         !principal.scopes.models?.includes(model) ||
