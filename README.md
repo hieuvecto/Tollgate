@@ -85,6 +85,9 @@ The generic adapter can target a separately run Ollama, llama-server, or other O
 - Streaming requests reject `Idempotency-Key`; non-streaming successes can replay.
 - A hard budget has a 1% tokenizer-estimate drift tolerance.
 - TPM is estimate-then-correct and may drift for the duration of a request plus settlement lag.
+- RPM and TPM use fixed one-minute buckets, so callers can burst across a bucket boundary.
+- If post-flight TPM correction cannot reach Redis, the conservative estimate remains until the
+  bucket expires; the completed provider response is not converted into a gateway error.
 - Missing terminal usage is explicitly estimated and requires reconciliation.
 - Fail-open is intended for brief finalization outages and uses Redis AOF; it is not a substitute for a replicated accounting store.
 - Provider cost and public price are modeled separately only at the routing boundary; production pricing needs contractual provider tiers.

@@ -18,7 +18,7 @@ Tollgate treats usage and money as accounting facts, not mutable request metadat
 
 For hard budgets, Tollgate estimates prompt tokens and adds the requested output maximum. If the caller omits `max_tokens`, the configured model cap is inserted into the upstream request. A single Redis Lua operation compares spent plus concurrent reservations with the limit. Provider tokenizer drift can make actual cost exceed a reservation; the supported hard-limit tolerance is 1% and reconciliation calls out larger discrepancies. Soft budgets admit traffic and report overage.
 
-RPM and TPM use atomic Redis admission. TPM debits an estimate before the call and corrects the current bucket after authoritative usage arrives. The drift window is the request duration plus settlement lag.
+RPM and TPM use atomic Redis admission. A rejected admission does not mutate any scope's counters. TPM debits an estimate before the call and returns the fixed-window bucket identifier; authoritative usage corrects that same bucket even when the request completes after a minute boundary. A post-flight Redis failure leaves the conservative estimate in place until the bucket expires rather than changing an already-completed provider response.
 
 ## Failure behavior
 

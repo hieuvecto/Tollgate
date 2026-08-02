@@ -191,6 +191,8 @@ async function handleNonStream(
   body: ChatCompletionRequest,
   started: StartedRequest,
   inputEstimate: number,
+  rateBucket: number,
+  tokenEstimate: number,
 ) {
   const began = performance.now();
   const controller = new AbortController();
@@ -241,8 +243,9 @@ async function handleNonStream(
       principal.orgId,
       principal.teamId,
       principal.apiKeyId,
-      usage.inputTokens + usage.outputTokens - inputEstimate,
-    );
+      rateBucket,
+      usage.inputTokens + usage.outputTokens - tokenEstimate,
+    ).catch((error: unknown) => request.log.warn({ err: error }, 'TPM correction failed'));
     tokens.inc(
       { model: catalog.publicName, direction: 'input', source: usage.source },
       usage.inputTokens,
@@ -282,6 +285,8 @@ async function handleStream(
   body: ChatCompletionRequest,
   started: StartedRequest,
   inputEstimate: number,
+  rateBucket: number,
+  tokenEstimate: number,
 ) {
   const began = performance.now();
   const controller = new AbortController();
@@ -379,12 +384,13 @@ async function handleStream(
       ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
       totalMs: Math.round(performance.now() - began),
     });
-    void correctTokens(
+    await correctTokens(
       principal.orgId,
       principal.teamId,
       principal.apiKeyId,
-      usage.inputTokens + usage.outputTokens - inputEstimate,
-    ).catch(() => undefined);
+      rateBucket,
+      usage.inputTokens + usage.outputTokens - tokenEstimate,
+    ).catch((error: unknown) => request.log.warn({ err: error }, 'TPM correction failed'));
   }
 }
 
@@ -456,13 +462,14 @@ export function buildGateway() {
           catalog.outputPrice,
           catalog.cachedPrice,
         );
+        const tokenEstimate = inputEstimate + maxOutput;
         const rate = await rateLimit(
           principal.orgId,
           principal.teamId,
           principal.apiKeyId,
           catalog.rpm,
           catalog.tpm,
-          inputEstimate + maxOutput,
+          tokenEstimate,
         );
         reply.headers({
           'x-ratelimit-limit': rate.limit,
@@ -509,8 +516,28 @@ export function buildGateway() {
         let result: unknown;
         try {
           result = body.stream
-            ? await handleStream(request, reply, principal, catalog, body, begun, inputEstimate)
-            : await handleNonStream(request, reply, principal, catalog, body, begun, inputEstimate);
+            ? await handleStream(
+                request,
+                reply,
+                principal,
+                catalog,
+                body,
+                begun,
+                inputEstimate,
+                rate.bucket,
+                tokenEstimate,
+              )
+            : await handleNonStream(
+                request,
+                reply,
+                principal,
+                catalog,
+                body,
+                begun,
+                inputEstimate,
+                rate.bucket,
+                tokenEstimate,
+              );
         } catch (error) {
           const fact: UsageFact = {
             requestId: begun.requestId,
@@ -642,8 +669,9 @@ export function buildGateway() {
           principal.orgId,
           principal.teamId,
           principal.apiKeyId,
+          rate.bucket,
           inputTokens - inputEstimate,
-        );
+        ).catch((error: unknown) => request.log.warn({ err: error }, 'TPM correction failed'));
         reply.header('x-tollgate-request-id', begun.requestId);
         return responseBody;
       } catch (error) {

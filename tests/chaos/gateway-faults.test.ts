@@ -269,10 +269,29 @@ suite('gateway fault and accounting contracts', () => {
   });
 
   it('enforces rate-limit rejection through the HTTP surface', async () => {
-    expect((await chat(rateLimited, { maxTokens: 1 })).status).toBe(200);
+    const accepted = await chat(rateLimited, { maxTokens: 1 });
+    expect(accepted.status).toBe(200);
+    const body = (await accepted.json()) as { usage: { total_tokens: number } };
     const rejected = await chat(rateLimited, { maxTokens: 1 });
     expect(rejected.status).toBe(429);
     expect(rejected.headers.get('retry-after')).toBeTruthy();
+    const bucket = Math.floor(Date.now() / 60_000);
+    for (const scope of [
+      `org:${rateLimited.orgId}`,
+      `team:${rateLimited.teamId}`,
+      `key:${rateLimited.keyId}`,
+    ]) {
+      expect(
+        await (
+          await import('../../packages/gateway/src/auth.js')
+        ).redis.get(`rl:rpm:${scope}:${bucket}`),
+      ).toBe('1');
+      expect(
+        await (
+          await import('../../packages/gateway/src/auth.js')
+        ).redis.get(`rl:tpm:${scope}:${bucket}`),
+      ).toBe(String(body.usage.total_tokens));
+    }
   });
 
   it('enforces a hard budget before invoking the provider', async () => {
