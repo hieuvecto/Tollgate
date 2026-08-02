@@ -121,6 +121,13 @@ export async function reapReservations(maxAgeMinutes = 10): Promise<number> {
   return (stale.rowCount ?? 0) + (pending.rowCount ?? 0);
 }
 
+export async function expireIdempotencyKeys(): Promise<number> {
+  const result = await query(
+    `UPDATE requests SET idempotency_key=NULL,idempotency_response=NULL,idempotency_expires_at=NULL WHERE status<>'in_progress' AND idempotency_expires_at<=now()`,
+  );
+  return result.rowCount ?? 0;
+}
+
 export async function closeWorkerResources() {
   await workerRedis.quit();
   await pool().end();

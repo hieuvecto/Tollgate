@@ -5,6 +5,7 @@ import {
   reapReservations,
   closeWorkerResources,
   drainMeteringSpool,
+  expireIdempotencyKeys,
 } from './settlement.js';
 import { query } from '@tollgate/db';
 
@@ -32,6 +33,7 @@ app.get('/metrics', async (_request, reply) => {
 const loop = setInterval(() => {
   void drainMeteringSpool()
     .then(() => settleBatch())
+    .then(() => expireIdempotencyKeys())
     .catch((error: unknown) => app.log.error(error));
   void reapReservations().catch((error: unknown) => app.log.error(error));
 }, 500);

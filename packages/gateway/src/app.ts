@@ -36,6 +36,7 @@ const forwardedFaultHeaders = [
 interface StartedRequest {
   requestId: string;
   reservationId: string;
+  storesIdempotencyResponse: boolean;
 }
 
 async function beginRequest(
@@ -50,7 +51,7 @@ async function beginRequest(
   try {
     await transaction(async (client) => {
       await client.query(
-        `INSERT INTO requests(id,org_id,team_id,api_key_id,model_id,pricing_id,idempotency_key,stream) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+        `INSERT INTO requests(id,org_id,team_id,api_key_id,model_id,pricing_id,idempotency_key,idempotency_expires_at,stream) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           requestId,
           principal.orgId,
@@ -59,6 +60,9 @@ async function beginRequest(
           catalog.modelId,
           catalog.pricingId,
           idempotencyKey ?? null,
+          idempotencyKey
+            ? new Date(Date.now() + config.IDEMPOTENCY_RETENTION_HOURS * 3_600_000)
+            : null,
           stream,
         ],
       );
@@ -80,11 +84,15 @@ async function beginRequest(
       );
     throw error;
   }
-  return { requestId, reservationId };
+  return { requestId, reservationId, storesIdempotencyResponse: idempotencyKey !== undefined };
 }
 
 async function replayFor(orgId: string, idempotencyKey: string | undefined) {
   if (!idempotencyKey) return undefined;
+  await query(
+    `UPDATE requests SET idempotency_key=NULL,idempotency_response=NULL,idempotency_expires_at=NULL WHERE org_id=$1 AND idempotency_key=$2 AND status<>'in_progress' AND idempotency_expires_at<=now()`,
+    [orgId, idempotencyKey],
+  );
   const existing = await query<Record<string, unknown>>(
     'SELECT status,idempotency_response FROM requests WHERE org_id=$1 AND idempotency_key=$2',
     [orgId, idempotencyKey],
@@ -223,7 +231,7 @@ async function handleNonStream(
         firstTokenMs: Math.round(performance.now() - began),
         totalMs: Math.round(performance.now() - began),
       },
-      responseBody,
+      started.storesIdempotencyResponse ? responseBody : undefined,
     );
     await correctTokens(
       principal.orgId,
@@ -618,7 +626,7 @@ export function buildGateway() {
           'succeeded',
           selected.binding.providerId,
           { totalMs: 0 },
-          responseBody,
+          begun.storesIdempotencyResponse ? responseBody : undefined,
         );
         await correctTokens(
           principal.orgId,

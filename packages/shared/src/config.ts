@@ -12,6 +12,7 @@ const schema = z.object({
   TTFT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   TOTAL_STREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   DEFAULT_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(512),
+  IDEMPOTENCY_RETENTION_HOURS: z.coerce.number().int().positive().default(24),
 });
 
 export type Config = z.infer<typeof schema>;

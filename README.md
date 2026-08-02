@@ -86,6 +86,8 @@ The generic adapter can target a separately run Ollama, llama-server, or other O
 ## Known limitations
 
 - Streaming requests reject `Idempotency-Key`; non-streaming successes can replay.
+- Non-streaming idempotency keys and replay bodies are retained for 24 hours by default; accounting
+  facts are retained independently.
 - Provider tokenizer drift can settle above the reserved estimate; no fixed percentage tolerance is claimed.
 - TPM is estimate-then-correct and may drift for the duration of a request plus settlement lag.
 - RPM and TPM use fixed one-minute buckets, so callers can burst across a bucket boundary.

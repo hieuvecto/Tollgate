@@ -35,6 +35,7 @@ suite('gateway fault and accounting contracts', () => {
   const mock = buildMockProvider();
   let gateway: FastifyInstance;
   let settleBatch: (batchSize?: number) => Promise<number>;
+  let expireIdempotencyKeys: () => Promise<number>;
   let closeWorkerResources: () => Promise<void>;
   let gatewayUrl = '';
   let mockUrl = '';
@@ -193,6 +194,7 @@ suite('gateway fault and accounting contracts', () => {
     const workerModule = await import('../../packages/worker/src/settlement.js');
     gateway = gatewayModule.buildGateway();
     settleBatch = workerModule.settleBatch;
+    expireIdempotencyKeys = workerModule.expireIdempotencyKeys;
     closeWorkerResources = workerModule.closeWorkerResources;
     await gateway.listen({ host: '127.0.0.1', port: 0 });
     const gatewayAddress = gateway.server.address();
@@ -211,11 +213,25 @@ suite('gateway fault and accounting contracts', () => {
     const replayKey = `replay-${randomUUID()}`;
     const first = await chat(standard, { idempotencyKey: replayKey, maxTokens: 4 });
     expect(first.status).toBe(200);
-    const firstBody = (await first.json()) as { model: string };
+    const firstBody = (await first.json()) as { id: string; model: string };
     expect(firstBody.model).toBe(publicModel);
+    const stored = await query<{ has_response: boolean; has_expiry: boolean }>(
+      `SELECT idempotency_response IS NOT NULL has_response,idempotency_expires_at IS NOT NULL has_expiry FROM requests WHERE org_id=$1 AND idempotency_key=$2`,
+      [standard.orgId, replayKey],
+    );
+    expect(stored.rows[0]).toEqual({ has_response: true, has_expiry: true });
     const replay = await chat(standard, { idempotencyKey: replayKey, maxTokens: 4 });
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
+
+    await query(
+      `UPDATE requests SET idempotency_expires_at=now()-interval '1 second' WHERE org_id=$1 AND idempotency_key=$2`,
+      [standard.orgId, replayKey],
+    );
+    expect(await expireIdempotencyKeys()).toBeGreaterThanOrEqual(1);
+    const afterExpiry = await chat(standard, { idempotencyKey: replayKey, maxTokens: 4 });
+    expect(afterExpiry.status).toBe(200);
+    expect(((await afterExpiry.json()) as { id: string }).id).not.toBe(firstBody.id);
 
     const conflictKey = `conflict-${randomUUID()}`;
     const requests = await Promise.all([
@@ -236,6 +252,11 @@ suite('gateway fault and accounting contracts', () => {
     expect(response.status).toBe(200);
     const requestId = response.headers.get('x-tollgate-request-id');
     expect(requestId).toBeTruthy();
+    const stored = await query<{ idempotency_response: unknown }>(
+      `SELECT idempotency_response FROM requests WHERE id=$1`,
+      [requestId],
+    );
+    expect(stored.rows[0]?.idempotency_response).toBeNull();
     await settleBatch(100);
     const facts = await query<Record<string, unknown>>(
       `SELECT u.source,u.input_tokens,u.output_tokens,l.kind,l.amount_micros,r.status reservation_status FROM usage_events u JOIN ledger_entries l ON l.request_id=u.request_id JOIN reservations r ON r.request_id=u.request_id WHERE u.request_id=$1`,
