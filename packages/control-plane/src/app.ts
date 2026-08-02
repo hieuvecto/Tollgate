@@ -61,6 +61,11 @@ const allow =
     return authenticated;
   };
 
+async function requireTeamInOrg(teamId: string, orgId: string): Promise<void> {
+  const team = await query('SELECT 1 FROM teams WHERE id=$1 AND org_id=$2', [teamId, orgId]);
+  if (!team.rowCount) throw new TollgateError(404, 'team_not_found', 'Team not found');
+}
+
 export function buildControlPlane() {
   const app = Fastify({ loggerInstance: createLogger(), disableRequestLogging: true });
   app.setErrorHandler((error, _request, reply) => {
@@ -126,6 +131,7 @@ export function buildControlPlane() {
     { preHandler: allow('owner', 'admin') },
     async (request, reply) => {
       const a = await actor(request);
+      if (request.body.teamId) await requireTeamInOrg(request.body.teamId, a.orgId);
       const issued = issueSecret('tg_live', config.KEY_PEPPER);
       const created = await query<{ id: string }>(
         `INSERT INTO api_keys(org_id,team_id,name,key_prefix,key_hash,scopes) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
@@ -175,6 +181,7 @@ export function buildControlPlane() {
     Body: { teamId?: string; period: 'day' | 'month'; limitMicros: string; hardStop: boolean };
   }>('/admin/budgets', { preHandler: allow('owner', 'admin') }, async (request) => {
     const a = await actor(request);
+    if (request.body.teamId) await requireTeamInOrg(request.body.teamId, a.orgId);
     await query(
       `INSERT INTO budgets(org_id,team_id,period,limit_micros,hard_stop) VALUES($1,$2,$3,$4,$5) ON CONFLICT(org_id,team_id,period) DO UPDATE SET limit_micros=EXCLUDED.limit_micros,hard_stop=EXCLUDED.hard_stop`,
       [
@@ -209,28 +216,6 @@ export function buildControlPlane() {
       )
     ).rows,
   }));
-  app.post<{
-    Body: {
-      modelId: string;
-      inputPerMtok: string;
-      outputPerMtok: string;
-      cachedInputPerMtok: string;
-      effectiveFrom: string;
-    };
-  }>('/admin/pricing', { preHandler: allow('owner') }, async (request, reply) => {
-    const b = request.body;
-    const row = await query<{ id: string }>(
-      `INSERT INTO model_pricing(model_id,input_per_mtok,output_per_mtok,cached_input_per_mtok,effective_from) VALUES($1,$2,$3,$4,$5) RETURNING id`,
-      [
-        b.modelId,
-        BigInt(b.inputPerMtok).toString(),
-        BigInt(b.outputPerMtok).toString(),
-        BigInt(b.cachedInputPerMtok).toString(),
-        b.effectiveFrom,
-      ],
-    );
-    return reply.code(201).send(row.rows[0]);
-  });
   app.get<{ Querystring: { groupBy?: string; from?: string; to?: string; format?: string } }>(
     '/reports/spend',
     { preHandler: allow('owner', 'admin', 'billing_viewer') },

@@ -103,6 +103,8 @@ The generic adapter can target a separately run Ollama, llama-server, or other O
 - Provider credentials and authenticated upstream calls are not implemented; bundled providers are local
   mocks or separately operated unauthenticated endpoints.
 - Providers, models, bindings, and pricing are a global operator catalog rather than tenant-owned resources.
+  Tenant credentials can read that catalog but cannot mutate global pricing; local operator changes use seed
+  data or forward migrations until a separate platform-admin trust boundary exists.
 
 ## How this was built
 
