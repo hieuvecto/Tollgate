@@ -127,6 +127,8 @@ Fault injection uses `X-Tollgate-Fault`: `pre_500`, `midstream_500`, `rate_limit
 
 Prometheus loads checked-in alerts for API error rate, outbox lag and dead letters, overdue reservations, and open provider breakers. The bundled Alertmanager receiver is deliberately local and has no external paging destination; production deployment must route it to the owning team's incident system.
 
+The service images use package-local compiled JavaScript, install production dependencies only, run as the unprivileged `tollgate` user, and expose HTTP health checks. The Compose stack explicitly uses development configuration for its bundled local pepper. A production process refuses to start with that pepper, so deployments must supply a unique `KEY_PEPPER` through their secret manager.
+
 ## Benchmarks
 
 Run the gateway load profile with `make load`. For the deliberately limited language comparison, start `docker compose --profile benchmark up --build go-baseline` and apply the same direct pass-through workload to ports 3000 and 3010. The Go service is a streaming baseline—not a billing gateway—so its result isolates a lower bound rather than claiming feature parity.

@@ -8,7 +8,7 @@ down:
 migrate:
 	docker compose run --rm migrate
 seed:
-	docker compose run --rm migrate pnpm db:seed
+	docker compose run --rm migrate node packages/db/dist/seed.js
 test:
 	pnpm lint && pnpm typecheck && RUN_INTEGRATION=1 pnpm test
 chaos:
@@ -16,6 +16,6 @@ chaos:
 load:
 	docker compose --profile load run --rm k6
 reconcile:
-	docker compose exec worker pnpm reconcile
+	docker compose exec worker node packages/worker/dist/reconcile-once.js
 logs:
 	docker compose logs -f gateway control-plane worker mock-provider

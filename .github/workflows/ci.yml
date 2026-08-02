@@ -22,8 +22,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate
       - run: pnpm lint
+      - run: pnpm format:check
       - run: pnpm typecheck
+      - run: pnpm build
       - run: RUN_INTEGRATION=1 pnpm test
         env:
           DATABASE_URL: postgres://tollgate:tollgate@localhost:5432/tollgate
           REDIS_URL: redis://localhost:6379
+      - run: docker build --target gateway --tag tollgate-gateway:ci .
+      - run: docker build --target control-plane --tag tollgate-control-plane:ci .
+      - run: docker build --target worker --tag tollgate-worker:ci .

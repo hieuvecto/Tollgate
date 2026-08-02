@@ -2,6 +2,7 @@
   "name": "tollgate",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@11.9.0",
   "engines": {
     "node": ">=22"
@@ -12,13 +13,13 @@
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
-    "test": "vitest run",
-    "test:unit": "vitest run tests/unit",
-    "test:integration": "RUN_INTEGRATION=1 vitest run tests/integration",
-    "test:chaos": "vitest run tests/chaos --passWithNoTests",
-    "db:migrate": "tsx packages/db/src/migrate.ts",
-    "db:seed": "tsx packages/db/src/seed.ts",
-    "reconcile": "tsx packages/worker/src/reconcile-once.ts"
+    "test": "NODE_OPTIONS=--conditions=source vitest run",
+    "test:unit": "NODE_OPTIONS=--conditions=source vitest run tests/unit",
+    "test:integration": "RUN_INTEGRATION=1 NODE_OPTIONS=--conditions=source vitest run tests/integration",
+    "test:chaos": "NODE_OPTIONS=--conditions=source vitest run tests/chaos --passWithNoTests",
+    "db:migrate": "NODE_OPTIONS=--conditions=source tsx packages/db/src/migrate.ts",
+    "db:seed": "NODE_OPTIONS=--conditions=source tsx packages/db/src/seed.ts",
+    "reconcile": "NODE_OPTIONS=--conditions=source tsx packages/worker/src/reconcile-once.ts"
   },
   "dependencies": {
     "@tollgate/db": "workspace:*",

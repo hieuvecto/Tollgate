@@ -25,9 +25,9 @@ services:
     volumes: ['redis-data:/data']
 
   migrate:
-    build: { context: ., target: base }
-    command: ['pnpm', 'db:migrate']
+    build: { context: ., target: migrate }
     environment: &app-env
+      NODE_ENV: development
       DATABASE_URL: postgres://tollgate:tollgate@postgres:5432/tollgate
       REDIS_URL: redis://redis:6379
       KEY_PEPPER: local-only-pepper-change-me
@@ -48,7 +48,7 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-      mock-provider: { condition: service_started }
+      mock-provider: { condition: service_healthy }
     ports: ['${GATEWAY_PORT:-3000}:3000']
 
   control-plane:
