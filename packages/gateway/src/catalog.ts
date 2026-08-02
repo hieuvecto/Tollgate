@@ -14,14 +14,12 @@ export interface Catalog {
   bindings: ProviderBinding[];
   rpm: number;
   tpm: number;
-  budgetLimit: bigint;
-  hardStop: boolean;
   strategy: 'cheapest' | 'lowest_latency' | 'weighted' | 'failover_order';
 }
 
 async function loadCatalogFromDb(orgId: string, model: string): Promise<Catalog> {
   const rows = await query<Record<string, unknown>>(
-    `SELECT m.id model_id,m.public_name,m.default_max_output_tokens,p.id pricing_id,p.input_per_mtok,p.output_per_mtok,p.cached_input_per_mtok,r.rpm_limit,r.tpm_limit,r.strategy,COALESCE(b.limit_micros,9223372036854775807) budget_limit,COALESCE(b.hard_stop,false) hard_stop FROM models m JOIN model_pricing p ON p.model_id=m.id AND p.effective_from<=now() AND (p.effective_to IS NULL OR p.effective_to>now()) LEFT JOIN routing_policies r ON r.org_id=$1 LEFT JOIN budgets b ON b.org_id=$1 AND b.team_id IS NULL WHERE m.public_name=$2`,
+    `SELECT m.id model_id,m.public_name,m.default_max_output_tokens,p.id pricing_id,p.input_per_mtok,p.output_per_mtok,p.cached_input_per_mtok,r.rpm_limit,r.tpm_limit,r.strategy FROM models m JOIN model_pricing p ON p.model_id=m.id AND p.effective_from<=now() AND (p.effective_to IS NULL OR p.effective_to>now()) LEFT JOIN routing_policies r ON r.org_id=$1 WHERE m.public_name=$2`,
     [orgId, model],
   );
   const row = rows.rows[0];
@@ -55,8 +53,6 @@ async function loadCatalogFromDb(orgId: string, model: string): Promise<Catalog>
     })),
     rpm: Number(row.rpm_limit ?? 60),
     tpm: Number(row.tpm_limit ?? 100000),
-    budgetLimit: BigInt(String(row.budget_limit)),
-    hardStop: Boolean(row.hard_stop),
     strategy:
       typeof row.strategy === 'string' ? (row.strategy as Catalog['strategy']) : 'failover_order',
   };
@@ -80,12 +76,11 @@ export async function loadCatalog(orgId: string, model: string): Promise<Catalog
     if (!cached) throw error;
     const value = JSON.parse(cached) as Omit<
       Catalog,
-      'inputPrice' | 'outputPrice' | 'cachedPrice' | 'budgetLimit' | 'bindings'
+      'inputPrice' | 'outputPrice' | 'cachedPrice' | 'bindings'
     > & {
       inputPrice: string;
       outputPrice: string;
       cachedPrice: string;
-      budgetLimit: string;
       bindings: Array<
         Omit<ProviderBinding, 'inputCostPerMtok' | 'outputCostPerMtok'> & {
           inputCostPerMtok?: string;
@@ -98,7 +93,6 @@ export async function loadCatalog(orgId: string, model: string): Promise<Catalog
       inputPrice: BigInt(value.inputPrice),
       outputPrice: BigInt(value.outputPrice),
       cachedPrice: BigInt(value.cachedPrice),
-      budgetLimit: BigInt(value.budgetLimit),
       bindings: value.bindings.map(({ inputCostPerMtok, outputCostPerMtok, ...binding }) => ({
         ...binding,
         ...(inputCostPerMtok === undefined ? {} : { inputCostPerMtok: BigInt(inputCostPerMtok) }),

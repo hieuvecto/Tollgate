@@ -13,8 +13,13 @@ import {
 } from '@tollgate/shared';
 import { authenticate, redis, type Principal } from './auth.js';
 import { estimateTokens, loadCatalog, type Catalog } from './catalog.js';
-import { correctTokens, rateLimit, reserveBudget } from './limits.js';
-import { finalizeRequest, spoolUsage } from './metering.js';
+import { correctTokens, rateLimit } from './limits.js';
+import {
+  admitReservationBudget,
+  finalizeRequest,
+  rejectPendingReservation,
+  spoolUsage,
+} from './metering.js';
 import { inFlight, latency, registry, requests, tokens, ttft } from './metrics.js';
 import { normalizeProviderResponse, providerRequest } from './providers.js';
 import { recordProviderResult, routeBindings } from './routing.js';
@@ -30,7 +35,6 @@ const forwardedFaultHeaders = [
 interface StartedRequest {
   requestId: string;
   reservationId: string;
-  reservedMicros: bigint;
 }
 
 async function beginRequest(
@@ -73,28 +77,9 @@ async function beginRequest(
         'idempotency_in_progress',
         'A request with this Idempotency-Key already exists',
       );
-    if (principal.meteringFailure === 'fail_open' && !idempotencyKey) {
-      await redis.xadd(
-        'metering:requests',
-        '*',
-        'payload',
-        JSON.stringify({
-          requestId,
-          reservationId,
-          reservedMicros: reservedMicros.toString(),
-          orgId: principal.orgId,
-          teamId: principal.teamId,
-          apiKeyId: principal.apiKeyId,
-          modelId: catalog.modelId,
-          pricingId: catalog.pricingId,
-          stream,
-        }),
-      );
-      return { requestId, reservationId, reservedMicros };
-    }
     throw error;
   }
-  return { requestId, reservationId, reservedMicros };
+  return { requestId, reservationId };
 }
 
 async function replayFor(orgId: string, idempotencyKey: string | undefined) {
@@ -485,32 +470,12 @@ export function buildGateway() {
         );
         if ('replay' in begun) return begun.replay;
         try {
-          await reserveBudget(principal.orgId, catalog.budgetLimit, reserved, catalog.hardStop);
+          await admitReservationBudget(begun.reservationId);
         } catch (error) {
-          try {
-            await query(
-              `UPDATE reservations SET status='released',released_at=now() WHERE id=$1 AND status='pending'`,
-              [begun.reservationId],
-            );
-            await query(
-              `UPDATE requests SET status='failed',finalized_at=now() WHERE id=$1 AND status='in_progress'`,
-              [begun.requestId],
-            );
-          } catch {
-            // The durable fail-open request spool is reconciled when PostgreSQL recovers.
-          }
-          throw error;
-        }
-        try {
-          await query(
-            `UPDATE reservations SET status='reserved' WHERE id=$1 AND status='pending'`,
-            [begun.reservationId],
+          await rejectPendingReservation(begun.reservationId, begun.requestId).catch(
+            () => undefined,
           );
-        } catch (error) {
-          if (principal.meteringFailure === 'fail_closed') {
-            await redis.decrby(`budget:reserved:${principal.orgId}`, reserved.toString());
-            throw error;
-          }
+          throw error;
         }
         const body = { ...request.body, max_tokens: maxOutput };
         let result: unknown;
@@ -607,23 +572,10 @@ export function buildGateway() {
       const begun = await beginRequest(principal, catalog, false, idempotencyKey, reserved);
       if ('replay' in begun) return begun.replay;
       try {
-        await reserveBudget(principal.orgId, catalog.budgetLimit, reserved, catalog.hardStop);
+        await admitReservationBudget(begun.reservationId);
       } catch (error) {
-        await query(
-          `UPDATE reservations SET status='released',released_at=now() WHERE id=$1 AND status='pending'`,
-          [begun.reservationId],
-        ).catch(() => undefined);
+        await rejectPendingReservation(begun.reservationId, begun.requestId).catch(() => undefined);
         throw error;
-      }
-      try {
-        await query(`UPDATE reservations SET status='reserved' WHERE id=$1 AND status='pending'`, [
-          begun.reservationId,
-        ]);
-      } catch (error) {
-        if (principal.meteringFailure === 'fail_closed') {
-          await redis.decrby(`budget:reserved:${principal.orgId}`, reserved.toString());
-          throw error;
-        }
       }
       const controller = new AbortController();
       try {

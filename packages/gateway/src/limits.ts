@@ -29,13 +29,6 @@ end
 return 1
 `;
 
-const RESERVE_LUA = `
-local limit=tonumber(ARGV[1]); local amount=tonumber(ARGV[2]); local hard=ARGV[3]=='1'; local ttl=tonumber(ARGV[4])
-local spent=tonumber(redis.call('GET',KEYS[1]) or '0'); local reserved=tonumber(redis.call('GET',KEYS[2]) or '0')
-if hard and spent+reserved+amount>limit then return {0,spent,reserved} end
-redis.call('INCRBY',KEYS[2],amount); redis.call('PEXPIRE',KEYS[2],ttl); return {1,spent,reserved+amount}
-`;
-
 export async function rateLimit(
   orgId: string,
   teamId: string | null,
@@ -83,34 +76,4 @@ export async function correctTokens(
     (scope) => `rl:tpm:${scope}:${bucket}`,
   );
   await redis.eval(CORRECT_TOKENS_LUA, keys.length, ...keys, delta);
-}
-
-export async function reserveBudget(
-  orgId: string,
-  limit: bigint,
-  amount: bigint,
-  hard: boolean,
-): Promise<void> {
-  const result = (await redis.eval(
-    RESERVE_LUA,
-    2,
-    `budget:spent:${orgId}`,
-    `budget:reserved:${orgId}`,
-    limit.toString(),
-    amount.toString(),
-    hard ? '1' : '0',
-    3_600_000,
-  )) as number[];
-  if (result[0] !== 1) throw new TollgateError(402, 'budget_exceeded', 'Budget exhausted');
-}
-
-export async function releaseReservation(
-  orgId: string,
-  reserved: bigint,
-  actual: bigint,
-): Promise<void> {
-  const pipeline = redis.pipeline();
-  pipeline.decrby(`budget:reserved:${orgId}`, reserved.toString());
-  pipeline.incrby(`budget:spent:${orgId}`, actual.toString());
-  await pipeline.exec();
 }

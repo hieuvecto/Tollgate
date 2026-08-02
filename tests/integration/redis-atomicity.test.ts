@@ -1,17 +1,15 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { correctTokens, rateLimit, reserveBudget } from '../../packages/gateway/src/limits.js';
+import { correctTokens, rateLimit } from '../../packages/gateway/src/limits.js';
 import { redis } from '../../packages/gateway/src/auth.js';
 
 const suite = process.env.RUN_INTEGRATION === '1' ? describe : describe.skip;
 
 suite('atomic Redis admission', () => {
-  const org = randomUUID();
   const rateOrg = randomUUID();
   const rateTeam = randomUUID();
   const rateKey = randomUUID();
   afterAll(async () => {
-    await redis.del(`budget:spent:${org}`, `budget:reserved:${org}`);
     const rateKeys = await redis.keys(`rl:*:*:${rateOrg}:*`);
     if (rateKeys.length) await redis.del(...rateKeys);
     const teamKeys = await redis.keys(`rl:*:team:${rateTeam}:*`);
@@ -19,14 +17,6 @@ suite('atomic Redis admission', () => {
     const keyKeys = await redis.keys(`rl:*:key:${rateKey}:*`);
     if (keyKeys.length) await redis.del(...keyKeys);
     await redis.quit();
-  });
-
-  it('admits only the requests covered by a hard budget under concurrency', async () => {
-    const results = await Promise.allSettled(
-      Array.from({ length: 50 }, () => reserveBudget(org, 300n, 10n, true)),
-    );
-    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(30);
-    expect(await redis.get(`budget:reserved:${org}`)).toBe('300');
   });
 
   it('does not consume RPM or TPM when an admission is rejected', async () => {

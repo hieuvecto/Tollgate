@@ -12,8 +12,6 @@ const catalog = (strategy: Catalog['strategy']): Catalog => ({
   cachedPrice: 1n,
   rpm: 1,
   tpm: 1,
-  budgetLimit: 1n,
-  hardStop: true,
   strategy,
   bindings: [
     {

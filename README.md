@@ -41,9 +41,9 @@ Gateway, control plane, Grafana, Prometheus, and mock provider listen on ports 3
 ```text
 client -> gateway -> provider bindings -> local mock
             |              |
-       Redis admission   health/failover
+       Redis rate limit  health/failover
             |
-       PostgreSQL request + outbox
+       PostgreSQL budget + request + outbox
             |
           worker -> usage facts -> immutable ledger
             |
@@ -64,7 +64,8 @@ The central lifecycle is reserve → invoke → record → settle → reconcile.
 | Decision                    | Optimized for                                       | Gave up                         | Revisit when                                    |
 | --------------------------- | --------------------------------------------------- | ------------------------------- | ----------------------------------------------- |
 | PostgreSQL outbox           | Auditability and few moving parts                   | Broker throughput               | Sustained settlement volume exceeds DB capacity |
-| Redis reserve/limit Lua     | Atomic concurrent admission                         | Cross-region operation          | A real multi-region customer exists             |
+| PostgreSQL budget locks     | Ledger-derived period and team enforcement          | An extra admission query        | Measured DB contention justifies a projection   |
+| Redis rate-limit Lua        | Atomic fixed-window RPM/TPM admission               | Cross-region operation          | A real multi-region customer exists             |
 | Abort on disconnect         | Stop unwanted provider spend                        | Guaranteed final provider usage | Providers offer reliable cancellation receipts  |
 | Reject stream idempotency   | Honest pass-through streaming                       | Stream replay                   | Clients require durable stream resumption       |
 | HMAC-SHA-256 API-key hashes | Fast verification of high-entropy generated secrets | Password-grade work factor      | User-chosen low-entropy secrets are accepted    |
@@ -83,13 +84,15 @@ The generic adapter can target a separately run Ollama, llama-server, or other O
 ## Known limitations
 
 - Streaming requests reject `Idempotency-Key`; non-streaming successes can replay.
-- A hard budget has a 1% tokenizer-estimate drift tolerance.
+- Provider tokenizer drift can settle above the reserved estimate; no fixed percentage tolerance is claimed.
 - TPM is estimate-then-correct and may drift for the duration of a request plus settlement lag.
 - RPM and TPM use fixed one-minute buckets, so callers can burst across a bucket boundary.
 - If post-flight TPM correction cannot reach Redis, the conservative estimate remains until the
   bucket expires; the completed provider response is not converted into a gateway error.
 - Missing terminal usage is explicitly estimated and requires reconciliation.
-- Fail-open is intended for brief finalization outages and uses Redis AOF; it is not a substitute for a replicated accounting store.
+- Admission always requires PostgreSQL so idempotency and budgets remain durable. After provider invocation,
+  fail-open may spool final usage to Redis AOF during a brief finalization outage; it is not a substitute for
+  a replicated accounting store.
 - Provider cost and public price are modeled separately only at the routing boundary; production pricing needs contractual provider tiers.
 
 ## Operations and tests

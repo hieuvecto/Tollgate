@@ -39,14 +39,21 @@ suite('gateway fault and accounting contracts', () => {
   let gatewayUrl = '';
   let mockUrl = '';
   let publicModel = '';
+  let modelId = '';
+  let pricingId = '';
+  let firstProviderId = '';
   let standard: TenantFixture;
   let rateLimited: TenantFixture;
   let budgetLimited: TenantFixture;
+  let ledgerLimited: TenantFixture;
+  let periodRolled: TenantFixture;
+  let concurrentBudget: TenantFixture;
 
   const makeTenant = async (
     label: string,
     rpm: number,
     budgetMicros: bigint,
+    options: { period?: 'day' | 'month'; teamBudgetMicros?: bigint } = {},
   ): Promise<TenantFixture> => {
     const orgId = randomUUID();
     const teamId = randomUUID();
@@ -67,18 +74,49 @@ suite('gateway fault and accounting contracts', () => {
         `integration-${label}`,
         issued.prefix,
         issued.hash,
-        JSON.stringify({ models: [publicModel], endpoints: ['chat'] }),
+        JSON.stringify({ models: [publicModel], endpoints: ['chat', 'embeddings'] }),
       ],
     );
     await query(
       `INSERT INTO routing_policies(org_id,strategy,rpm_limit,tpm_limit) VALUES($1,'failover_order',$2,1000000)`,
       [orgId, rpm],
     );
-    await query(
-      `INSERT INTO budgets(org_id,period,limit_micros,hard_stop) VALUES($1,'month',$2,true)`,
-      [orgId, budgetMicros.toString()],
-    );
+    await query(`INSERT INTO budgets(org_id,period,limit_micros,hard_stop) VALUES($1,$2,$3,true)`, [
+      orgId,
+      options.period ?? 'month',
+      budgetMicros.toString(),
+    ]);
+    if (options.teamBudgetMicros !== undefined)
+      await query(
+        `INSERT INTO budgets(org_id,team_id,period,limit_micros,hard_stop) VALUES($1,$2,$3,$4,true)`,
+        [orgId, teamId, options.period ?? 'month', options.teamBudgetMicros.toString()],
+      );
     return { orgId, teamId, keyId, key: issued.plaintext };
+  };
+
+  const addHistoricalCharge = async (
+    tenant: TenantFixture,
+    amountMicros: bigint,
+    createdAt: Date,
+  ) => {
+    const requestId = randomUUID();
+    await query(
+      `INSERT INTO requests(id,org_id,team_id,api_key_id,model_id,pricing_id,status,provider_id_used,created_at,finalized_at) VALUES($1,$2,$3,$4,$5,$6,'succeeded',$7,$8,$8)`,
+      [
+        requestId,
+        tenant.orgId,
+        tenant.teamId,
+        tenant.keyId,
+        modelId,
+        pricingId,
+        firstProviderId,
+        createdAt,
+      ],
+    );
+    await query(
+      `INSERT INTO ledger_entries(org_id,team_id,request_id,amount_micros,kind,pricing_id,created_at) VALUES($1,$2,$3,$4,'charge',$5,$6)`,
+      [tenant.orgId, tenant.teamId, requestId, amountMicros.toString(), pricingId, createdAt],
+    );
   };
 
   const chat = async (
@@ -112,9 +150,9 @@ suite('gateway fault and accounting contracts', () => {
     const mockAddress = mock.server.address();
     if (!mockAddress || typeof mockAddress === 'string') throw new Error('mock did not bind');
 
-    const modelId = randomUUID();
-    const pricingId = randomUUID();
-    const firstProviderId = randomUUID();
+    modelId = randomUUID();
+    pricingId = randomUUID();
+    firstProviderId = randomUUID();
     const secondProviderId = randomUUID();
     publicModel = `integration-${randomUUID()}`;
     mockUrl = `http://127.0.0.1:${mockAddress.port}`;
@@ -142,7 +180,14 @@ suite('gateway fault and accounting contracts', () => {
     );
     standard = await makeTenant('standard', 1000, 1_000_000_000n);
     rateLimited = await makeTenant('rate', 1, 1_000_000_000n);
-    budgetLimited = await makeTenant('budget', 1000, 1n);
+    budgetLimited = await makeTenant('budget', 1000, 1_000_000_000n, {
+      teamBudgetMicros: 1n,
+    });
+    ledgerLimited = await makeTenant('ledger-budget', 1000, 50n, { period: 'day' });
+    periodRolled = await makeTenant('period-budget', 1000, 50n, { period: 'day' });
+    concurrentBudget = await makeTenant('concurrent-budget', 1000, 25n, { period: 'day' });
+    await addHistoricalCharge(ledgerLimited, 50n, new Date());
+    await addHistoricalCharge(periodRolled, 100n, new Date(Date.now() - 86_400_000));
 
     const gatewayModule = await import('../../packages/gateway/src/app.js');
     const workerModule = await import('../../packages/worker/src/settlement.js');
@@ -303,6 +348,42 @@ suite('gateway fault and accounting contracts', () => {
       data: unknown[];
     };
     expect(invoice.data).toHaveLength(before);
+  });
+
+  it('makes a budget-rejected embedding request terminal', async () => {
+    const response = await fetch(`${gatewayUrl}/v1/embeddings`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${budgetLimited.key}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ model: publicModel, input: 'budget rejection input' }),
+    });
+    expect(response.status).toBe(402);
+    const request = await query<{ status: string; reservation_status: string }>(
+      `SELECT q.status,r.status reservation_status FROM requests q JOIN reservations r ON r.request_id=q.id WHERE q.api_key_id=$1 ORDER BY q.created_at DESC LIMIT 1`,
+      [budgetLimited.keyId],
+    );
+    expect(request.rows[0]).toEqual({ status: 'failed', reservation_status: 'released' });
+  });
+
+  it('rebuilds current-period spend from the ledger and ignores a prior period', async () => {
+    expect((await chat(ledgerLimited, { maxTokens: 1 })).status).toBe(402);
+    expect((await chat(periodRolled, { maxTokens: 1 })).status).toBe(200);
+  });
+
+  it('serializes concurrent reservations against the same hard budget', async () => {
+    const responses = await Promise.all([
+      chat(concurrentBudget, {
+        maxTokens: 1,
+        headers: { 'x-tollgate-ttft-ms': '100' },
+      }),
+      chat(concurrentBudget, {
+        maxTokens: 1,
+        headers: { 'x-tollgate-ttft-ms': '100' },
+      }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 402]);
   });
 
   it('aborts the upstream request when a streaming client disconnects', async () => {

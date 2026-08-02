@@ -16,12 +16,12 @@ Tollgate treats usage and money as accounting facts, not mutable request metadat
 
 ## Reserve and settle
 
-For hard budgets, Tollgate estimates prompt tokens and adds the requested output maximum. If the caller omits `max_tokens`, the configured model cap is inserted into the upstream request. A single Redis Lua operation compares spent plus concurrent reservations with the limit. Provider tokenizer drift can make actual cost exceed a reservation; the supported hard-limit tolerance is 1% and reconciliation calls out larger discrepancies. Soft budgets admit traffic and report overage.
+For hard budgets, Tollgate estimates prompt tokens and adds the requested output maximum. If the caller omits `max_tokens`, the configured model cap is inserted into the upstream request. PostgreSQL locks every applicable organization and team budget row, then compares current-period ledger entries plus pending and active reservations with each limit. Day and month periods are UTC calendar periods pinned to request creation time. The ledger and reservations are authoritative, so Redis flushes and settlement crash windows cannot reset enforcement. Provider tokenizer drift can still make actual cost exceed the reservation; no fixed tolerance is claimed. Soft budgets admit traffic and remain visible in spend reports.
 
 RPM and TPM use atomic Redis admission. A rejected admission does not mutate any scope's counters. TPM debits an estimate before the call and returns the fixed-window bucket identifier; authoritative usage corrects that same bucket even when the request completes after a minute boundary. A post-flight Redis failure leaves the conservative estimate in place until the bucket expires rather than changing an already-completed provider response.
 
 ## Failure behavior
 
-The default `fail_closed` policy rejects traffic if it cannot create durable request/outbox state. An explicitly configured `fail_open` organization may spool final usage into Redis AOF when PostgreSQL finalization fails. A client disconnect aborts the upstream request; observed tokens become an estimated usage fact if the provider never emitted final usage.
+Admission rejects traffic if it cannot create durable request and reservation state, regardless of finalization policy. After provider invocation, an explicitly configured `fail_open` organization may spool final usage into Redis AOF when PostgreSQL finalization fails. A client disconnect aborts the upstream request; observed tokens become an estimated usage fact if the provider never emitted final usage.
 
 The worker never edits an accounting fact. Corrections are new reversal or adjustment entries. Reconciliation proposes adjustments but never applies them automatically.
