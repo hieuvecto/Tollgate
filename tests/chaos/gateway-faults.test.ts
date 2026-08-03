@@ -91,11 +91,12 @@ suite('gateway fault and accounting contracts', () => {
       options.period ?? 'month',
       budgetMicros.toString(),
     ]);
-    if (options.teamBudgetMicros !== undefined)
+    if (options.teamBudgetMicros !== undefined) {
       await query(
         `INSERT INTO budgets(org_id,team_id,period,limit_micros,hard_stop) VALUES($1,$2,$3,$4,true)`,
         [orgId, teamId, options.period ?? 'month', options.teamBudgetMicros.toString()],
       );
+    }
     return { orgId, teamId, keyId, key: issued.plaintext };
   };
 
@@ -220,8 +221,9 @@ suite('gateway fault and accounting contracts', () => {
     closeWorkerResources = workerModule.closeWorkerResources;
     await gateway.listen({ host: '127.0.0.1', port: 0 });
     const gatewayAddress = gateway.server.address();
-    if (!gatewayAddress || typeof gatewayAddress === 'string')
+    if (!gatewayAddress || typeof gatewayAddress === 'string') {
       throw new Error('gateway did not bind');
+    }
     gatewayUrl = `http://127.0.0.1:${gatewayAddress.port}`;
   });
 

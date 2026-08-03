@@ -24,8 +24,9 @@ export async function authenticate(request: FastifyRequest): Promise<Principal> 
   const header = request.headers.authorization;
   const secret = header?.startsWith('Bearer ') ? header.slice(7) : '';
   const prefix = secretPrefix(secret);
-  if (!prefix?.startsWith('tg_live_'))
+  if (!prefix?.startsWith('tg_live_')) {
     throw new TollgateError(401, 'invalid_api_key', 'Invalid API key');
+  }
   const cacheKey = `policy:${prefix}`;
   let row: Record<string, unknown> | null = null;
   try {
@@ -52,8 +53,9 @@ export async function authenticate(request: FastifyRequest): Promise<Principal> 
     !row ||
     row.status !== 'active' ||
     !verifySecret(secret, String(row.key_hash), config.KEY_PEPPER)
-  )
+  ) {
     throw new TollgateError(401, 'invalid_api_key', 'Invalid API key');
+  }
   void query('UPDATE api_keys SET last_used_at=now() WHERE id=$1', [row.api_key_id]).catch(
     () => undefined,
   );

@@ -12,8 +12,9 @@ describe('Prometheus alerting', () => {
       'TollgateReservationLeak',
       'TollgateProviderBreakerOpen',
       'TollgateOutboxDeadLetter',
-    ])
+    ]) {
       expect(rules).toContain(`alert: ${alert}`);
+    }
   });
 });
 

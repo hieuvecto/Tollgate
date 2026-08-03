@@ -24,58 +24,65 @@ export async function reconcile(
   const invoice = new Map(providerInvoice.map((item) => [item.requestId, item]));
   for (const row of requests.rows) {
     const id = String(row.id);
-    if (!row.source)
+    if (!row.source) {
       findings.push({
         category: 'missing_usage',
         requestId: id,
         detail: 'Request has no usage event',
       });
-    if (row.source === 'estimated')
+    }
+    if (row.source === 'estimated') {
       findings.push({
         category: 'estimated_usage',
         requestId: id,
         detail: 'Provider usage was unavailable',
       });
-    if (row.status === 'client_aborted')
+    }
+    if (row.status === 'client_aborted') {
       findings.push({
         category: 'client_aborted',
         requestId: id,
         detail: 'Client disconnected during streaming',
       });
-    if (Number(row.attempt_count) > 1)
+    }
+    if (Number(row.attempt_count) > 1) {
       findings.push({
         category: 'retried_request',
         requestId: id,
         detail: `${String(row.attempt_count)} attempts`,
       });
+    }
     const reported = invoice.get(id);
     if (
       reported &&
       (reported.inputTokens !== Number(row.input_tokens) ||
         reported.outputTokens !== Number(row.output_tokens))
-    )
+    ) {
       findings.push({
         category: 'provider_mismatch',
         requestId: id,
         detail: `ledger=${String(row.input_tokens)}/${String(row.output_tokens)} provider=${reported.inputTokens}/${reported.outputTokens}`,
       });
+    }
     invoice.delete(id);
   }
-  for (const id of invoice.keys())
+  for (const id of invoice.keys()) {
     findings.push({
       category: 'provider_only',
       requestId: id,
       detail: 'Provider reported usage without a matching request',
     });
+  }
   const orphaned = await query<{ request_id: string }>(
     `SELECT request_id FROM reservations WHERE status='reserved' AND created_at < now()-interval '10 minutes'`,
   );
-  for (const row of orphaned.rows)
+  for (const row of orphaned.rows) {
     findings.push({
       category: 'orphaned_reservation',
       requestId: row.request_id,
       detail: 'Reservation exceeded its settlement window',
     });
+  }
   const inserted = await query<{ id: string }>(
     `INSERT INTO reconciliation_runs(period_start,period_end,findings,proposed_adjustments) VALUES($1,$2,$3,'[]') RETURNING id`,
     [periodStart, periodEnd, JSON.stringify(findings)],

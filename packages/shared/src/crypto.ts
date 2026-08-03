@@ -7,7 +7,11 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 
-export type IssuedSecret = { plaintext: string; prefix: string; hash: string };
+export interface IssuedSecret {
+  plaintext: string;
+  prefix: string;
+  hash: string;
+}
 export interface SealedSecret {
   ciphertext: string;
   secretIv: string;

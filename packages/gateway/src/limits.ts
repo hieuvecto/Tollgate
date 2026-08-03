@@ -50,13 +50,14 @@ export async function rateLimit(
     tpm,
     estimate,
   )) as number[];
-  if (result[0] !== 1)
+  if (result[0] !== 1) {
     throw new TollgateError(
       429,
       'rate_limit_exceeded',
       'Rate limit exceeded',
       Math.ceil((result[3] ?? 1000) / 1000),
     );
+  }
   return {
     limit: rpm,
     remaining: result[1] ?? 0,

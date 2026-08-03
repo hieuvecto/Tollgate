@@ -50,7 +50,7 @@ function anthropicMessages(messages: ChatCompletionRequest['messages']): unknown
     .filter((message) => message.role !== 'system')
     .map((message) => {
       const value = message as typeof message & { tool_call_id?: string };
-      if (message.role === 'tool')
+      if (message.role === 'tool') {
         return {
           role: 'user',
           content: [
@@ -61,10 +61,12 @@ function anthropicMessages(messages: ChatCompletionRequest['messages']): unknown
             },
           ],
         };
+      }
       if (message.role === 'assistant' && message.tool_calls?.length) {
         const content: unknown[] = [];
-        if (typeof message.content === 'string' && message.content)
+        if (typeof message.content === 'string' && message.content) {
           content.push({ type: 'text', text: message.content });
+        }
         for (const call of message.tool_calls) {
           if (!call || typeof call !== 'object') continue;
           const toolCall = call as Record<string, unknown>;
@@ -117,8 +119,9 @@ function normalizeCompatibleStream(response: Response, publicModel: string): Res
         buffer += decoder.decode(chunk.value, { stream: true });
         const events = buffer.split('\n\n');
         buffer = events.pop() ?? '';
-        for (const event of events)
+        for (const event of events) {
           controller.enqueue(encoder.encode(`${transformEvent(event)}\n\n`));
+        }
       }
       buffer += decoder.decode();
       if (buffer) controller.enqueue(encoder.encode(transformEvent(buffer)));
@@ -176,8 +179,9 @@ export async function normalizeProviderResponse(
   if (!response.ok) return response;
   if (!response.body) return response;
   if (binding.kind !== 'anthropic') {
-    if (response.headers.get('content-type')?.includes('text/event-stream'))
+    if (response.headers.get('content-type')?.includes('text/event-stream')) {
       return normalizeCompatibleStream(response, publicModel);
+    }
     const raw = (await response.json()) as Record<string, unknown>;
     return new Response(JSON.stringify({ ...raw, model: publicModel }), {
       status: response.status,
@@ -348,13 +352,14 @@ export async function normalizeProviderResponse(
           return;
         }
         if (type === 'message_stop') {
-          if (!emittedFinish)
+          if (!emittedFinish) {
             enqueue([{ index: 0, delta: {}, finish_reason: 'stop' }], {
               prompt_tokens: inputTokens,
               completion_tokens: 0,
               total_tokens: inputTokens,
               prompt_tokens_details: { cached_tokens: cachedInputTokens },
             });
+          }
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         }
       };

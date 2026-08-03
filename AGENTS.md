@@ -16,6 +16,13 @@
 - Tests require no provider key or network egress.
 - Do not silently change documented behavior to make a test pass.
 
+## TypeScript style
+
+- Follow the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html);
+  ESLint and Prettier are authoritative.
+- Do not suppress style or type errors without a documented external-contract reason.
+- Preserve required database, wire, environment, and tool-defined names and exports.
+
 ## Definition of done
 
 1. Typecheck, lint, and tests pass.

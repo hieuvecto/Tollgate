@@ -1,4 +1,4 @@
-export type MoneyMicros = bigint & { readonly __brand: 'MoneyMicros' };
+export type MoneyMicros = bigint & { readonly moneyMicrosBrand: 'MoneyMicros' };
 export const micros = (value: bigint): MoneyMicros => value as MoneyMicros;
 
 export function priceTokens(

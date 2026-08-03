@@ -54,8 +54,9 @@ export async function admitReservationBudget(
     );
     const spent = BigInt(state.rows[0]?.spent ?? '0');
     const reserved = BigInt(state.rows[0]?.reserved ?? '0');
-    if (budget.hard_stop && spent + reserved > BigInt(budget.limit_micros))
+    if (budget.hard_stop && spent + reserved > BigInt(budget.limit_micros)) {
       throw new TollgateError(402, 'budget_exceeded', 'Budget exhausted');
+    }
   }
   await client.query(`UPDATE reservations SET status='reserved' WHERE id=$1 AND status='pending'`, [
     reservationId,

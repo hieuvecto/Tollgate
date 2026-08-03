@@ -17,15 +17,15 @@ suite('database money invariants', () => {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
-      const org = randomUUID(),
-        team = randomUUID(),
-        key = randomUUID(),
-        provider = randomUUID(),
-        model = randomUUID(),
-        pricing = randomUUID(),
-        request = randomUUID(),
-        usage = randomUUID(),
-        ledger = randomUUID();
+      const org = randomUUID();
+      const team = randomUUID();
+      const key = randomUUID();
+      const provider = randomUUID();
+      const model = randomUUID();
+      const pricing = randomUUID();
+      const request = randomUUID();
+      const usage = randomUUID();
+      const ledger = randomUUID();
       await client.query(`INSERT INTO orgs(id,name) VALUES($1,'test')`, [org]);
       await client.query(`INSERT INTO teams(id,org_id,name) VALUES($1,$2,'team')`, [team, org]);
       await client.query(

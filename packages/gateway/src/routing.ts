@@ -5,7 +5,7 @@ import { providerBreakerOpen } from './metrics.js';
 
 export function routeBindings(catalog: Catalog, random = Math.random): ProviderBinding[] {
   const candidates = [...catalog.bindings];
-  if (catalog.strategy === 'cheapest')
+  if (catalog.strategy === 'cheapest') {
     return candidates.sort((a, b) =>
       Number(
         (a.inputCostPerMtok ?? 0n) +
@@ -13,11 +13,13 @@ export function routeBindings(catalog: Catalog, random = Math.random): ProviderB
           ((b.inputCostPerMtok ?? 0n) + (b.outputCostPerMtok ?? 0n)),
       ),
     );
-  if (catalog.strategy === 'lowest_latency')
+  }
+  if (catalog.strategy === 'lowest_latency') {
     return candidates.sort(
       (a, b) =>
         (a.ewmaTtftMs ?? Number.MAX_SAFE_INTEGER) - (b.ewmaTtftMs ?? Number.MAX_SAFE_INTEGER),
     );
+  }
   if (catalog.strategy === 'weighted') {
     return candidates
       .map((binding) => ({

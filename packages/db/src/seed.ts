@@ -78,11 +78,12 @@ await transaction(async (client) => {
     `INSERT INTO provider_bindings(model_id,provider_id,provider_model_name,priority,input_cost_per_mtok,output_cost_per_mtok) VALUES($1,$2,'mock-chat',1,500000,1000000),($1,$3,'mock-chat',2,600000,1200000),($4,$5,'claude-mock',1,700000,1400000),($6,$3,'mock-chat',1,550000,1100000)`,
     [publicMock.id, mock.id, compatible.id, publicAnthropic.id, anthropic.id, publicCompatible.id],
   );
-  for (const model of models.rows)
+  for (const model of models.rows) {
     await client.query(
       `INSERT INTO model_pricing(model_id,input_per_mtok,output_per_mtok,cached_input_per_mtok,effective_from) VALUES($1,1000000,2000000,250000,'2020-01-01')`,
       [model.id],
     );
+  }
   await client.query(
     `INSERT INTO routing_policies(org_id,strategy,rpm_limit,tpm_limit) VALUES($1,'failover_order',60,100000),($2,'weighted',120,200000)`,
     [acme, sandbox],

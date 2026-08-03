@@ -5,7 +5,7 @@ import { query, transaction } from '@tollgate/db';
 import {
   createLogger,
   loadConfig,
-  openAIError,
+  openAiError,
   priceTokens,
   TollgateError,
   type ChatCompletionRequest,
@@ -86,12 +86,13 @@ async function beginRequest(
       }
     });
   } catch (error: unknown) {
-    if ((error as { code?: string }).code === '23505' && idempotencyKey)
+    if ((error as { code?: string }).code === '23505' && idempotencyKey) {
       throw new TollgateError(
         409,
         'idempotency_in_progress',
         'A request with this Idempotency-Key already exists',
       );
+    }
     throw error;
   }
   if (admissionError) throw admissionError;
@@ -152,8 +153,9 @@ async function providerFetch(
       'x-tollgate-request-id': requestId,
       ...translated.headers,
     });
-    for (const name of forwardedFaultHeaders)
+    for (const name of forwardedFaultHeaders) {
       if (attempt === 0 && request.headers[name]) headers.set(name, String(request.headers[name]));
+    }
     let rawResponse: Response;
     try {
       rawResponse = await fetch(translated.url, {
@@ -164,12 +166,13 @@ async function providerFetch(
       });
     } catch {
       await recordProviderResult(binding.bindingId, false);
-      if (signal.aborted)
+      if (signal.aborted) {
         throw new TollgateError(
           504,
           'provider_timeout',
           'Provider timed out before the first byte',
         );
+      }
       continue;
     }
     const response = await normalizeProviderResponse(binding, rawResponse, catalog.publicName);
@@ -212,8 +215,9 @@ async function handleNonStream(
       controller.signal,
     );
     clearTimeout(timer);
-    if (!response.ok)
+    if (!response.ok) {
       throw new TollgateError(response.status, 'provider_error', 'Provider request failed');
+    }
     const responseBody = (await response.json()) as Record<string, unknown>;
     ttft.observe(
       { model: catalog.publicName, provider: binding.providerId },
@@ -319,8 +323,9 @@ async function handleStream(
       controller.signal,
     );
     providerId = selected.binding.providerId;
-    if (!selected.response.ok || !selected.response.body)
+    if (!selected.response.ok || !selected.response.body) {
       throw new TollgateError(selected.response.status, 'provider_error', 'Provider stream failed');
+    }
     clearTimeout(ttftTimer);
     reply.hijack();
     reply.raw.writeHead(200, {
@@ -336,8 +341,9 @@ async function handleStream(
       const chunk = await reader.read();
       if (chunk.done) break;
       firstTokenMs ??= Math.round(performance.now() - began);
-      if (!reply.raw.write(chunk.value))
+      if (!reply.raw.write(chunk.value)) {
         await once(reply.raw, 'drain', { signal: controller.signal });
+      }
       parseBuffer += decoder.decode(chunk.value, { stream: true });
       const events = parseBuffer.split('\n\n');
       parseBuffer = events.pop() ?? '';
@@ -351,8 +357,9 @@ async function handleStream(
         if (parsed.error) status = 'failed';
         const choices = parsed.choices as Array<{ delta?: { content?: string } }> | undefined;
         outputText += choices?.[0]?.delta?.content ?? '';
-        if (parsed.usage)
+        if (parsed.usage) {
           finalUsage = usageFromResponse(parsed, inputEstimate, estimateTokens(outputText));
+        }
       }
     }
     reply.raw.end();
@@ -423,17 +430,17 @@ export function buildGateway() {
     const model = typeof body?.model === 'string' ? body.model : 'unknown';
     requests.inc({ model, provider: 'gateway', status: String(reply.statusCode) });
   });
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     app.log.error(error);
     const known =
       error instanceof TollgateError
         ? error
         : new TollgateError(500, 'internal_error', 'Internal gateway error');
     if (known.retryAfterSeconds) reply.header('retry-after', known.retryAfterSeconds);
-    void reply.code(known.status).send(openAIError(known));
+    void reply.code(known.status).send(openAiError(known));
   });
   app.get('/health', async () => ({ status: 'ok' }));
-  app.get('/metrics', async (_request, reply) =>
+  app.get('/metrics', async (request, reply) =>
     reply.type(registry.contentType).send(await registry.metrics()),
   );
   app.get('/v1/models', { preHandler: authenticateRequest }, async () => {
@@ -459,17 +466,19 @@ export function buildGateway() {
       const stop = latency.startTimer({ model: chatBody.model });
       try {
         const principal = principalFor(request);
-        if (chatBody.stream && request.headers['idempotency-key'])
+        if (chatBody.stream && request.headers['idempotency-key']) {
           throw new TollgateError(
             400,
             'stream_idempotency_unsupported',
             'Idempotency-Key is not supported for streaming requests',
           );
+        }
         if (
           !principal.scopes.models?.includes(chatBody.model) ||
           !principal.scopes.endpoints?.includes('chat')
-        )
+        ) {
           throw new TollgateError(403, 'scope_denied', 'API key scope does not allow this request');
+        }
         const idempotencyKey = request.headers['idempotency-key']
           ? String(request.headers['idempotency-key'])
           : undefined;
@@ -570,8 +579,9 @@ export function buildGateway() {
       if (
         !principal.scopes.models?.includes(model) ||
         !principal.scopes.endpoints?.includes('embeddings')
-      )
+      ) {
         throw new TollgateError(403, 'scope_denied', 'API key scope does not allow this request');
+      }
       const idempotencyKey = request.headers['idempotency-key']
         ? String(request.headers['idempotency-key'])
         : undefined;
@@ -612,12 +622,13 @@ export function buildGateway() {
           begun.requestId,
           controller.signal,
         );
-        if (!selected.response.ok)
+        if (!selected.response.ok) {
           throw new TollgateError(
             selected.response.status,
             'provider_error',
             'Provider request failed',
           );
+        }
         const responseBody = (await selected.response.json()) as Record<string, unknown>;
         const providerUsage = responseBody.usage as Record<string, unknown> | undefined;
         const inputTokens = Number(providerUsage?.prompt_tokens ?? inputEstimate);

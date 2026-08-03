@@ -19,7 +19,7 @@ export interface UsageFact {
 
 export interface ChatCompletionRequest {
   model: string;
-  messages: Array<{ role: string; content?: string | Array<unknown>; tool_calls?: unknown[] }>;
+  messages: Array<{ role: string; content?: string | unknown[]; tool_calls?: unknown[] }>;
   stream?: boolean;
   max_tokens?: number;
   tools?: unknown[];

@@ -45,8 +45,9 @@ async function loadCatalogFromDb(orgId: string, model: string): Promise<Catalog>
     `SELECT pb.id binding_id,p.id provider_id,p.kind,p.base_url,pb.provider_model_name,pb.priority,pb.weight,pb.input_cost_per_mtok,pb.output_cost_per_mtok,h.ewma_ttft_ms,h.breaker_state,h.opened_at,pc.encrypted_secret,pc.secret_iv,pc.secret_tag,pc.wrapped_dek,pc.wrap_iv,pc.wrap_tag,pc.key_version FROM provider_bindings pb JOIN providers p ON p.id=pb.provider_id LEFT JOIN provider_health h ON h.binding_id=pb.id LEFT JOIN provider_credentials pc ON pc.provider_id=p.id AND pc.org_id=$2 AND pc.status='active' WHERE pb.model_id=$1 AND pb.enabled AND p.enabled AND (h.breaker_state IS DISTINCT FROM 'open' OR h.opened_at < now()-interval '30 seconds') ORDER BY pb.priority`,
     [row.model_id, orgId],
   );
-  if (!bindings.rowCount)
+  if (!bindings.rowCount) {
     throw new TollgateError(503, 'provider_unavailable', 'No provider binding is available');
+  }
   return {
     modelId: String(row.model_id),
     publicName: String(row.public_name),
@@ -59,12 +60,13 @@ async function loadCatalogFromDb(orgId: string, model: string): Promise<Catalog>
       const credentialRequired = item.encrypted_secret instanceof Buffer;
       let credential: string | undefined;
       if (credentialRequired) {
-        if (!providerCredentialKek)
+        if (!providerCredentialKek) {
           throw new TollgateError(
             503,
             'credential_decryption_unavailable',
             'Provider credential encryption is not configured',
           );
+        }
         const sealed: SealedSecret = {
           ciphertext: (item.encrypted_secret as Buffer).toString('base64'),
           secretIv: (item.secret_iv as Buffer).toString('base64'),
@@ -113,7 +115,7 @@ export async function loadCatalog(orgId: string, model: string): Promise<Catalog
     };
     await redis.set(
       cacheKey,
-      JSON.stringify(cacheable, (_key, value: unknown) =>
+      JSON.stringify(cacheable, (key, value: unknown) =>
         typeof value === 'bigint' ? value.toString() : value,
       ),
       'EX',
@@ -146,12 +148,13 @@ export async function loadCatalog(orgId: string, model: string): Promise<Catalog
           ? {}
           : { outputCostPerMtok: BigInt(outputCostPerMtok) }),
       }));
-    if (!restoredBindings.length)
+    if (!restoredBindings.length) {
       throw new TollgateError(
         503,
         'provider_unavailable',
         'No provider binding is available without credential storage',
       );
+    }
     return {
       ...value,
       inputPrice: BigInt(value.inputPrice),

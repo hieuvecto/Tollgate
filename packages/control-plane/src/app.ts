@@ -7,7 +7,7 @@ import {
   issueSecret,
   loadConfig,
   moneyJson,
-  openAIError,
+  openAiError,
   secretPrefix,
   sealSecret,
   secretFingerprint,
@@ -30,8 +30,9 @@ async function actor(request: FastifyRequest): Promise<Actor> {
     ? request.headers.authorization.slice(7)
     : '';
   const prefix = secretPrefix(secret);
-  if (!prefix?.startsWith('tg_admin_'))
+  if (!prefix?.startsWith('tg_admin_')) {
     throw new TollgateError(401, 'invalid_token', 'Invalid control-plane token');
+  }
   const result = await query<Record<string, unknown>>(
     `SELECT t.user_id,t.token_hash,t.status,u.org_id,array_agg(DISTINCT m.role) roles FROM control_plane_tokens t JOIN users u ON u.id=t.user_id JOIN memberships m ON m.user_id=u.id WHERE t.token_prefix=$1 GROUP BY t.user_id,t.token_hash,t.status,u.org_id`,
     [prefix],
@@ -41,8 +42,9 @@ async function actor(request: FastifyRequest): Promise<Actor> {
     !row ||
     row.status !== 'active' ||
     !verifySecret(secret, String(row.token_hash), config.KEY_PEPPER)
-  )
+  ) {
     throw new TollgateError(401, 'invalid_token', 'Invalid control-plane token');
+  }
   return {
     userId: String(row.user_id),
     orgId: String(row.org_id),
@@ -95,8 +97,9 @@ export function buildControlPlane() {
     (...roles: Role[]) =>
     async (request: FastifyRequest) => {
       const authenticated = await actor(request);
-      if (!authenticated.roles.some((role) => roles.includes(role)))
+      if (!authenticated.roles.some((role) => roles.includes(role))) {
         throw new TollgateError(403, 'forbidden', 'Role does not permit this operation');
+      }
       actors.set(request, authenticated);
     };
   const actorFor = (request: FastifyRequest): Actor => {
@@ -105,13 +108,13 @@ export function buildControlPlane() {
     return authenticated;
   };
   const app = Fastify({ loggerInstance: createLogger(), disableRequestLogging: true });
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     app.log.error(error);
     const known =
       error instanceof TollgateError
         ? error
         : new TollgateError(500, 'internal_error', 'Internal control-plane error');
-    void reply.code(known.status).send(openAIError(known));
+    void reply.code(known.status).send(openAiError(known));
   });
   app.get('/health', async () => ({ status: 'ok' }));
   app.get(
@@ -327,12 +330,13 @@ export function buildControlPlane() {
     { preHandler: allow('owner', 'admin') },
     async (request) => {
       const a = actorFor(request);
-      if (!request.body.apiKey || request.body.apiKey.length < 8)
+      if (!request.body.apiKey || request.body.apiKey.length < 8) {
         throw new TollgateError(
           400,
           'invalid_request_error',
           'Provider apiKey must be at least 8 characters',
         );
+      }
       await requireProvider(request.params.providerId);
       let kek: Buffer;
       try {
@@ -389,8 +393,9 @@ export function buildControlPlane() {
           `UPDATE provider_credentials SET status='revoked',revoked_at=now(),updated_at=now() WHERE org_id=$1 AND provider_id=$2 AND status='active'`,
           [a.orgId, request.params.providerId],
         );
-        if (!result.rowCount)
+        if (!result.rowCount) {
           throw new TollgateError(404, 'credential_not_found', 'Active credential not found');
+        }
         await appendAdminAudit(
           client,
           a,
@@ -443,12 +448,13 @@ export function buildControlPlane() {
         `SELECT ${expression}::text bucket,SUM(l.amount_micros)::text amount_micros FROM ledger_entries l JOIN requests r ON r.id=l.request_id WHERE l.org_id=$1 AND l.created_at>=COALESCE($2::timestamptz,'epoch') AND l.created_at<COALESCE($3::timestamptz,'infinity') GROUP BY ${expression} ORDER BY ${expression}`,
         [a.orgId, request.query.from ?? null, request.query.to ?? null],
       );
-      if (request.query.format === 'csv')
+      if (request.query.format === 'csv') {
         return reply
           .type('text/csv')
           .send(
             `bucket,amount_micros\n${rows.rows.map((row) => `${row.bucket},${row.amount_micros}`).join('\n')}\n`,
           );
+      }
       return {
         data: rows.rows.map((row) => ({
           bucket: row.bucket,

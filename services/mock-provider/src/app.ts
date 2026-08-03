@@ -37,13 +37,15 @@ export function buildMockProvider() {
     const delay = Number(request.headers['x-tollgate-token-delay-ms'] ?? 0);
     const midstreamAfter = Number(request.headers['x-tollgate-fail-after-tokens'] ?? 2);
     const id = `chatcmpl_${randomUUID()}`;
-    if (fault === 'rate_limit')
+    if (fault === 'rate_limit') {
       return reply
         .header('retry-after', '1')
         .code(429)
         .send({ error: { message: 'injected rate limit' } });
-    if (fault === 'pre_500')
+    }
+    if (fault === 'pre_500') {
       return reply.code(500).send({ error: { message: 'injected pre-token failure' } });
+    }
     if (fault === 'hang') return await new Promise(() => undefined);
     await sleep(ttft);
     const content = 'Tollgate mock response';
@@ -86,11 +88,12 @@ export function buildMockProvider() {
           },
         ],
       };
-      if (fault !== 'missing_usage')
+      if (fault !== 'missing_usage') {
         response.usage =
           fault === 'wrong_usage'
             ? { ...usage, completion_tokens: 5, total_tokens: usage.prompt_tokens + 5 }
             : usage;
+      }
       return response;
     }
     reply.hijack();
@@ -113,10 +116,11 @@ export function buildMockProvider() {
       );
       await sleep(delay);
     }
-    if (fault !== 'missing_usage')
+    if (fault !== 'missing_usage') {
       reply.raw.write(
         `data: ${JSON.stringify({ id, object: 'chat.completion.chunk', model: request.body.model, choices: [], usage })}\n\n`,
       );
+    }
     reply.raw.write('data: [DONE]\n\n');
     reply.raw.end();
   });
@@ -128,7 +132,7 @@ export function buildMockProvider() {
       output_tokens: 3,
       cache_read_input_tokens: 1,
     };
-    if (!request.body.stream)
+    if (!request.body.stream) {
       return {
         id,
         type: 'message',
@@ -140,6 +144,7 @@ export function buildMockProvider() {
         stop_reason: request.body.tools ? 'tool_use' : 'end_turn',
         usage,
       };
+    }
     reply.hijack();
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream' });
     reply.raw.write(
@@ -152,11 +157,13 @@ export function buildMockProvider() {
       reply.raw.write(
         `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } })}\n\n`,
       );
-    } else
-      for (const text of ['Tollgate', ' mock', ' response'])
+    } else {
+      for (const text of ['Tollgate', ' mock', ' response']) {
         reply.raw.write(
           `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })}\n\n`,
         );
+      }
+    }
     reply.raw.write(
       `event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: request.body.tools ? 'tool_use' : 'end_turn' }, usage: { output_tokens: usage.output_tokens } })}\n\n`,
     );
