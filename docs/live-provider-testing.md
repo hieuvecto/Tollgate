@@ -498,7 +498,68 @@ money-path work is test-first" applies, and the default suite must stay hermetic
   provider key." That stays true; add a short pointer to this document so the BYOK path is
   discoverable, and record the L0 fixture-capture convention.
 
-## 10. What was verified in this session, and what was not
+## 10. Cheapest first pass: OpenRouter free-tier keys
+
+OpenRouter's API is OpenAI-shaped, and Tollgate's adapter (`providers.ts`) only special-cases
+`kind === 'anthropic'` — every other kind, including `openai_compatible`, goes through the same
+generic branch (Bearer auth, body forwarded verbatim with `model` swapped to the binding's
+`provider_model_name`). That means OpenRouter's free-tier models are a genuine zero-cost way to
+exercise the `openai_compatible` path end to end before touching a paid key, with no code
+changes required.
+
+**Setup**, as a variant of section 4 step 3:
+
+```sql
+INSERT INTO providers(name, kind, base_url) VALUES
+  ('openrouter-free', 'openai_compatible', 'https://openrouter.ai/api');
+  -- no /v1 — Tollgate appends "/v1/chat/completions" itself, same as the OpenAI binding
+
+INSERT INTO models(public_name, context_window, default_max_output_tokens) VALUES
+  ('live-openrouter-chat', 32000, 64);
+
+INSERT INTO model_pricing(model_id, input_per_mtok, output_per_mtok, cached_input_per_mtok, effective_from)
+SELECT id, 0, 0, 0, '2020-01-01' FROM models WHERE public_name = 'live-openrouter-chat';
+
+INSERT INTO provider_bindings(model_id, provider_id, provider_model_name, priority, input_cost_per_mtok, output_cost_per_mtok)
+SELECT m.id, p.id, 'meta-llama/llama-3.3-70b-instruct:free', 1, 0, 0
+  FROM models m, providers p
+ WHERE m.public_name = 'live-openrouter-chat' AND p.name = 'openrouter-free';
+```
+
+Store the OpenRouter key through `PUT /admin/provider-credentials/:providerId` exactly like any
+BYOK provider (section 4, step 4). Free tier does not relax B2 or B3 — `PROVIDER_CREDENTIAL_KEK`
+and API-key scoping are still required.
+
+**What it specifically buys, ahead of spending on a paid key:**
+
+- real coverage of the `openai_compatible` pass-through with a non-OpenAI upstream — today that
+  path is only exercised against the mock's `generic-compatible-mock`;
+- a genuine adversarial case for `TTFT_TIMEOUT_MS` (B4) — free-tier models queue and are slower
+  than paid ones;
+- real coverage of the `estimated`-vs-`provider` usage fallback — some OpenRouter upstreams omit
+  `usage` even with `stream_options.include_usage` set (which Tollgate already sends,
+  `app.ts:321`); if the specific free model doesn't return it, this exercises the fallback path
+  for free.
+
+**Caveats specific to this path, on top of the ones in section 3:**
+
+- hard rate limits (roughly 20 req/min, and a small daily cap without purchased credits) —
+  fine for L1 smoke, never point `make load`/k6 at it;
+- free model slugs are frequently deprecated or swapped by OpenRouter — pin the exact slug and
+  expect to update it against `openrouter.ai/models?max_price=0`;
+- a zero-priced binding cannot validate real cost arithmetic, so it does not substitute for L2's
+  accounting/drift measurement, and it cannot cover the Anthropic-specific `/v1/messages`
+  translation tests (B6/B7) — those still need one real Anthropic key;
+- OpenRouter proxies to varying upstreams per model, so error shapes and latency are less
+  consistent than a single vendor and shouldn't be treated as representative of paid-model
+  behavior.
+
+**Recommended sequencing:** run L0 fixture capture and L1 smoke against OpenRouter first (zero
+cost; covers `openai_compatible` plumbing and the usage-fallback path), then bring in one paid
+OpenAI key and one paid Anthropic key only for what OpenRouter can't cover — the Anthropic
+adapter tests and L2's real-price accounting/drift measurement.
+
+## 11. What was verified in this session, and what was not
 
 Verified by execution in this checkout:
 
